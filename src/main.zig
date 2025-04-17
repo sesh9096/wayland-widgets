@@ -2,6 +2,7 @@ const std = @import("std");
 const log = std.log;
 const math = std.math;
 const assert = std.debug.assert;
+const Allocator = std.mem.Allocator;
 const wayland = @import("wayland");
 const wl = wayland.client.wl;
 const xdg = wayland.client.xdg;
@@ -66,6 +67,7 @@ pub const Context = struct {
     wm_base: ?*xdg.WmBase = null,
     layer_shell: ?*wlr.LayerShellV1 = null,
     outputs: OutputList,
+    allocator: Allocator,
     fn destroy(self: *@This()) void {
         self.compositor.destroy();
         self.shm.destroy();
@@ -78,10 +80,11 @@ pub const Context = struct {
         self.outputs.deinit();
         self.display.disconnect();
     }
-    pub fn init(allocator: std.mem.Allocator) !@This() {
+    pub fn init(allocator: Allocator) !@This() {
         const display = try wl.Display.connect(null);
         const registry = try display.getRegistry();
         var context = @This(){
+            .allocator = allocator,
             .display = display,
             .outputs = OutputList.init(allocator),
             .scheduler = Scheduler.init(allocator),
@@ -100,24 +103,21 @@ pub const Context = struct {
 };
 
 pub fn main() !void {
-    // var GPA = std.heap.GeneralPurposeAllocator(.{}){};
-    // const allocator = GPA.allocator();
-    var buf: [4096]u8 = undefined;
-    var fba = std.heap.FixedBufferAllocator.init(&buf);
-    const allocator = fba.allocator();
+    var GPA = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = GPA.allocator();
+    // var buf: [4096]u8 = undefined;
+    // var fba = std.heap.FixedBufferAllocator.init(&buf);
+    // const allocator = fba.allocator();
     var context = try Context.init(allocator);
 
     const options = Options.parseArgs();
+    _ = options;
     var windows = Windows.init(allocator);
-    var image = widgets.Image{ .surface = cairo.Surface.createFromPng(options.filename.?.ptr) };
     // _ = image;
     try windows.append(.{
         // Background
-        .widget = .{ .image = &image },
-        // .widget = .{ .text = &text },
         .layer = .background,
         .anchor = .{ .top = true, .bottom = true, .left = true, .right = true },
-        .surface = null,
         .exclusiveZone = -1,
         .namespace = "background",
     });
@@ -128,17 +128,10 @@ pub fn main() !void {
     surface.registerListeners();
     if (context.display.dispatch() != .SUCCESS) return error.DispatchFailed;
 
-    windows.items[0].surface = &surface;
-
     var text_buf: [1024]u8 = undefined;
     text_buf[0] = 0;
-    var text = widgets.Text{ .text = text_buf[0..0 :0] };
-    var box = widgets.Box{ .x = 10, .y = 10, .width = 100, .height = 100 };
     var frame_data = FrameData{
         .buf = &text_buf,
-        .image_widget = &image,
-        .text_widget = &text,
-        .box_widget = &box,
         .surface = &surface,
     };
     const scheduler = &context.scheduler;
@@ -258,26 +251,45 @@ fn registryListener(registry: *wl.Registry, event: wl.Registry.Event, context: *
 
 const FrameData = struct {
     buf: []u8,
-    image_widget: *widgets.Image,
-    text_widget: *widgets.Text,
-    box_widget: *widgets.Box,
     counter: u32 = 0,
     surface: *Surface,
     pub fn timerTask(self: *FrameData) void {
+        self.frame() catch unreachable;
+    }
+
+    pub fn frame(self: *FrameData) !void {
         // self.text_widget.text = std.fmt.bufPrintZ(self.buf, "{}", .{self.counter}) catch unreachable;
         const time = std.time.timestamp();
         const time_string = c.ctime((&time));
         const time_string_len = std.mem.len(time_string);
-        self.text_widget.text = std.fmt.bufPrintZ(self.buf, "{s}", .{time_string[0 .. time_string_len - 1]}) catch unreachable;
-        // log.debug("{} drawing frame {}", .{ @mod(std.time.militaristic(), 60000), self.counter });
+        // log.debug("{} drawing frame {}", .{ @mod(std.time.milliTimestamp(), 60000), self.counter });
         log.debug("{s}: drawing frame {}", .{ time_string[0 .. time_string_len - 1], self.counter });
         self.counter += 1;
+        const s = self.surface;
         {
-            self.surface.beginFrame();
-            defer self.surface.endFrame();
-            self.surface.drawWidget(.{ .image = self.image_widget });
-            self.surface.drawWidget(.{ .text = self.text_widget });
-            self.surface.drawWidget(.{ .box = self.box_widget });
+            s.beginFrame();
+            defer s.endFrame();
+            const overlay = try s.overlay();
+            defer s.end(overlay);
+            try s.image("/home/ss/pictures/draw/experiment.png");
+            const box = try s.box(.left);
+            defer s.end(box);
+            const innerbox = try s.box(.left);
+            s.end(innerbox);
+            const innerbox1 = try s.box(.left);
+            s.end(innerbox1);
+            const innerbox2 = try s.box(.down);
+            defer s.end(innerbox2);
+            const innerbox3 = try s.box(.down);
+            s.end(innerbox3);
+            const innerbox4 = try s.box(.left);
+            s.end(innerbox4);
+            const timestring = std.fmt.bufPrintZ(self.buf, "{s}", .{time_string[0 .. time_string_len - 1]}) catch unreachable;
+            try s.text(timestring);
+            try s.text("Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.");
+            // s.drawWidget(.{ .image = self.image_widget });
+            // s.drawWidget(.{ .text = self.text_widget });
+            // s.drawWidget(.{ .box = self.box_widget });
         }
     }
 };

@@ -32,6 +32,7 @@ pub fn build(b: *std.Build) void {
     exe.linkLibC();
     exe.linkSystemLibrary("wayland-client");
     exe.linkSystemLibrary("cairo");
+    exe.linkSystemLibrary("pangocairo");
 
     b.installArtifact(exe);
 

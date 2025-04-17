@@ -25,6 +25,9 @@ pub const Context = opaque {
     extern fn cairo_set_source_rgb(self: *Context, red: f64, green: f64, blue: f64) void;
     pub const setSourceRgb = cairo_set_source_rgb;
 
+    extern fn cairo_set_line_width(self: *Context, width: f64) void;
+    pub const setLineWidth = cairo_set_line_width;
+
     extern fn cairo_stroke(self: *Context) void;
     pub const stroke = cairo_stroke;
 
@@ -54,6 +57,7 @@ pub const Context = opaque {
 
     pub fn roundRect(self: *Context, x: f64, y: f64, width: f64, height: f64, radius: f64) void {
         const halfPi = pi / 2.0;
+        self.moveTo(x, y);
         self.arc(x + radius, y + radius, radius, 2 * halfPi, 3 * halfPi);
         self.arc(x + width - radius, y + radius, radius, 3 * halfPi, 4 * halfPi);
         self.arc(x + width - radius, y + height - radius, radius, 0 * halfPi, 1 * halfPi);
@@ -76,25 +80,34 @@ pub const Surface = opaque {
     extern fn cairo_surface_destroy(self: *Surface) void;
     pub const destroy = cairo_surface_destroy;
 
+    extern fn cairo_surface_status(self: *Surface) Status;
+    pub const status = cairo_surface_status;
+
     extern fn cairo_image_surface_get_width(self: *Surface) i32;
     pub const getWidth = cairo_image_surface_get_width;
 
     extern fn cairo_image_surface_get_height(self: *Surface) i32;
     pub const getHeight = cairo_image_surface_get_width;
 
-    pub const Format = enum(c_int) {
-        INVALID = c.CAIRO_FORMAT_INVALID,
-        ARGB32 = c.CAIRO_FORMAT_ARGB32,
-        RGB24 = c.CAIRO_FORMAT_RGB24,
-        A8 = c.CAIRO_FORMAT_A8,
-        A1 = c.CAIRO_FORMAT_A1,
-        RGB16_565 = c.CAIRO_FORMAT_RGB16_565,
-        RGB30 = c.CAIRO_FORMAT_RGB30,
-        RGB96F = c.CAIRO_FORMAT_RGB96F,
-        RGBA128F = c.CAIRO_FORMAT_RGBA128F,
-    };
+    // pub fn createFromPngCheck(path: [*:0]const u8) Status!*Surface {
+    //     const surface = createFromPng(path);
+    //     const status = surface.status();
+    //     if (status != .SUCCESS) return statusToError(status);
+    //     return surface;
+    // }
 };
 
+pub const Format = enum(c_int) {
+    INVALID = c.CAIRO_FORMAT_INVALID,
+    ARGB32 = c.CAIRO_FORMAT_ARGB32,
+    RGB24 = c.CAIRO_FORMAT_RGB24,
+    A8 = c.CAIRO_FORMAT_A8,
+    A1 = c.CAIRO_FORMAT_A1,
+    RGB16_565 = c.CAIRO_FORMAT_RGB16_565,
+    RGB30 = c.CAIRO_FORMAT_RGB30,
+    RGB96F = c.CAIRO_FORMAT_RGB96F,
+    RGBA128F = c.CAIRO_FORMAT_RGBA128F,
+};
 pub const Slant = enum(c_uint) {
     Normal = c.CAIRO_FONT_SLANT_NORMAL,
     Italic = c.CAIRO_FONT_SLANT_ITALIC,
@@ -153,4 +166,52 @@ pub const Status = enum(c_int) {
     DWRITE_ERROR = c.CAIRO_STATUS_DWRITE_ERROR,
     SVG_FONT_ERROR = c.CAIRO_STATUS_SVG_FONT_ERROR,
     LAST_STATUS = c.CAIRO_STATUS_LAST_STATUS,
+};
+
+pub const StatusError = error{
+    NO_MEMORY,
+    INVALID_RESTORE,
+    INVALID_POP_GROUP,
+    NO_CURRENT_POINT,
+    INVALID_MATRIX,
+    INVALID_STATUS,
+    NULL_POINTER,
+    INVALID_STRING,
+    INVALID_PATH_DATA,
+    READ_ERROR,
+    WRITE_ERROR,
+    SURFACE_FINISHED,
+    SURFACE_TYPE_MISMATCH,
+    PATTERN_TYPE_MISMATCH,
+    INVALID_CONTENT,
+    INVALID_FORMAT,
+    INVALID_VISUAL,
+    FILE_NOT_FOUND,
+    INVALID_DASH,
+    INVALID_DSC_COMMENT,
+    INVALID_INDEX,
+    CLIP_NOT_REPRESENTABLE,
+    TEMP_FILE_ERROR,
+    INVALID_STRIDE,
+    FONT_TYPE_MISMATCH,
+    USER_FONT_IMMUTABLE,
+    USER_FONT_ERROR,
+    NEGATIVE_COUNT,
+    INVALID_CLUSTERS,
+    INVALID_SLANT,
+    INVALID_WEIGHT,
+    INVALID_SIZE,
+    USER_FONT_NOT_IMPLEMENTED,
+    DEVICE_TYPE_MISMATCH,
+    DEVICE_ERROR,
+    INVALID_MESH_CONSTRUCTION,
+    DEVICE_FINISHED,
+    JBIG2_GLOBAL_MISSING,
+    PNG_ERROR,
+    FREETYPE_ERROR,
+    WIN32_GDI_ERROR,
+    TAG_ERROR,
+    DWRITE_ERROR,
+    SVG_FONT_ERROR,
+    LAST_STATUS,
 };
