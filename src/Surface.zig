@@ -11,6 +11,7 @@ const xdg = wayland.client.xdg;
 const wlr = wayland.client.zwlr;
 const cairo = @import("./cairo.zig");
 const widgets = @import("./widgets.zig");
+const WidgetFromId = std.AutoHashMap(u32, *widgets.Widget);
 
 wl_surface: *wl.Surface,
 shared_memory: []align(std.mem.page_size) u8,
@@ -19,6 +20,7 @@ height: i32,
 buffers: [2]Buffer,
 current_buffer: u1 = 0,
 widget: ?*widgets.Widget = null,
+widget_storage: WidgetFromId,
 allocator: std.mem.Allocator,
 
 const Self = @This();
@@ -36,6 +38,7 @@ fn deinit(self: *@This()) void {
 }
 
 pub fn fromWlSurface(context: Context, wl_surface: *wl.Surface, width: i32, height: i32) !Self {
+    const allocator = context.allocator;
     const shm = context.shm;
     const shm_fd = try std.posix.memfd_create("shared_memory_buffer", 0);
     defer std.posix.close(shm_fd);
@@ -61,7 +64,8 @@ pub fn fromWlSurface(context: Context, wl_surface: *wl.Surface, width: i32, heig
         .width = width,
         .height = height,
         .shared_memory = pool,
-        .allocator = context.allocator,
+        .widget_storage = WidgetFromId.init(allocator),
+        .allocator = allocator,
         .buffers = .{
             Buffer{
                 .wl_buffer = try shm_pool.createBuffer(0, width, height, width * 4, .xrgb8888),
@@ -129,55 +133,77 @@ pub fn end(self: *Self, widget: *widgets.Widget) void {
     self.widget = widget.parent;
 }
 
-pub fn box(self: *Self, direction: widgets.Direction) !*widgets.Widget {
-    const widget = try widgets.Box.widget(self.allocator, direction);
+fn addChildToCurrentWidget(self: *Self, widget: *widgets.Widget) !void {
     if (self.widget) |parent| {
         widget.parent = parent;
         try parent.vtable.addChild(parent, widget);
     } else {
         widget.parent = widget;
     }
+}
+pub fn getWidget(self: *Self, id_gen: widgets.IdGenerator, T: type) !*widgets.Widget {
+    const id = id_gen.toId();
+    const get_or_put_res = try self.widget_storage.getOrPut(id);
+    const widget = if (get_or_put_res.found_existing) get_or_put_res.value_ptr.* else blk: {
+        const wid = try widgets.allocateWidget(self.allocator, T);
+        get_or_put_res.value_ptr.* = wid;
+        const inner: *T = @ptrCast(@alignCast(wid.inner));
+        if (@hasDecl(T, "init")) inner.init(self.allocator);
+        if (@hasDecl(T, "surface")) inner.surface = self;
+        break :blk wid;
+    };
+    return widget;
+}
+
+pub fn getBox(self: *Self, direction: widgets.Direction, id_gen: widgets.IdGenerator) !*widgets.Widget {
+    const widget = try self.getWidget(id_gen, widgets.Box);
+    widget.getInner(widgets.Box).configure(direction);
+
+    // const widget = try widgets.Box.widget(self.allocator, direction);
+    try self.addChildToCurrentWidget(widget);
+    self.widget = widget;
+    return widget;
+}
+pub fn box(self: *Self, direction: widgets.Direction, id_gen: widgets.IdGenerator) !*widgets.Widget {
+    const widget = try self.getBox(direction, id_gen);
     self.widget = widget;
     return widget;
 }
 
-pub fn overlay(self: *Self) !*widgets.Widget {
-    const widget = try widgets.Overlay.widget(self.allocator);
-    if (self.widget) |parent| {
-        widget.parent = parent;
-        try parent.vtable.addChild(parent, widget);
-    } else {
-        widget.parent = widget;
-    }
+pub fn getOverlay(self: *Self, id_gen: widgets.IdGenerator) !*widgets.Widget {
+    const widget = try self.getWidget(id_gen, widgets.Overlay);
+    widget.getInner(widgets.Overlay).configure();
+    try self.addChildToCurrentWidget(widget);
+    return widget;
+}
+pub fn overlay(self: *Self, id_gen: widgets.IdGenerator) !*widgets.Widget {
+    const widget = try self.getOverlay(id_gen);
     self.widget = widget;
     return widget;
 }
 
-pub fn image(self: *Self, path: [:0]const u8) !void {
+pub fn getImage(self: *Self, path: [:0]const u8, id_gen: widgets.IdGenerator) !*widgets.Widget {
     const surface = cairo.Surface.createFromPng(path);
     if (surface.status() != .SUCCESS) {
-        log.debug("{}", .{surface.status()});
+        log.warn("{}", .{surface.status()});
     }
-    const widget = try widgets.Image.widget(self.allocator, surface);
-    if (self.widget) |parent| {
-        widget.parent = parent;
-        try parent.vtable.addChild(parent, widget);
-    } else {
-        widget.parent = widget;
-    }
-
-    widget.parent = self.widget orelse widget;
+    const widget = try self.getWidget(id_gen, widgets.Image);
+    widget.getInner(widgets.Image).configure(surface);
+    try self.addChildToCurrentWidget(widget);
+    return widget;
 }
-pub fn text(self: *Self, txt: [:0]const u8) !void {
-    const widget = try widgets.Text.widget(self.allocator, txt);
-    if (self.widget) |parent| {
-        widget.parent = parent;
-        try parent.vtable.addChild(parent, widget);
-    } else {
-        widget.parent = widget;
-    }
+pub fn image(self: *Self, path: [:0]const u8, id_gen: widgets.IdGenerator) !void {
+    _ = try self.getImage(path, id_gen);
+}
 
-    widget.parent = self.widget orelse widget;
+pub fn getText(self: *Self, txt: [:0]const u8, id_gen: widgets.IdGenerator) !*widgets.Widget {
+    const widget = try self.getWidget(id_gen, widgets.Image);
+    try self.addChildToCurrentWidget(widget);
+    widget.getInner(widgets.Text).configure(txt);
+    return widget;
+}
+pub fn text(self: *Self, txt: [:0]const u8, id_gen: widgets.IdGenerator) !void {
+    _ = try self.getText(txt, id_gen);
 }
 
 pub fn surfaceListener(_: *wl.Surface, event: wl.Surface.Event, surface: *Self) void {
