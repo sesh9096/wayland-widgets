@@ -55,15 +55,119 @@ const Output = struct {
         wl_surface.commit();
         return Surface.fromWlSurface(context, wl_surface, @intCast(width), @intCast(height));
     }
+    pub fn listener(_: *wl.Output, event: wl.Output.Event, output: *Output) void {
+        // log.debug("hello from Listener", .{});
+        switch (event) {
+            .mode => |mode| {
+                log.debug("Output mode: {}x{}", .{ mode.width, mode.height });
+                output.width = mode.width;
+                output.height = mode.height;
+            },
+            .name => |name| {
+                log.debug("Name: {s}", .{name.name});
+                output.name = name.name;
+            },
+            .geometry => {
+                log.debug("Geometry", .{});
+            },
+            .scale => {
+                log.debug("Scale", .{});
+            },
+            .description => {
+                log.debug("Description", .{});
+            },
+            .done => {
+                log.debug("Output {s}: {}x{}", .{ output.name, output.width, output.height });
+            },
+            // else => {},
+        }
+    }
 };
 
 const OutputList = std.ArrayList(Output);
+
+const Seat = struct {
+    wl_seat: *wl.Seat,
+    wl_pointer: ?*wl.Pointer = null,
+    pointer_x: i32 = 0,
+    pointer_y: i32 = 0,
+    wl_keyboard: ?*wl.Keyboard = null,
+    wl_touch: ?*wl.Touch = null,
+    capabilities: wl.Seat.Capability = undefined,
+    name: [*:0]const u8 = "",
+    fn deinit(self: *@This()) void {
+        self.wl_seat.deinit();
+    }
+    fn init(self: *@This()) void {
+        self.wl_seat.setListener(*@This(), listener, self);
+    }
+    pub fn listener(_: *wl.Seat, event: wl.Seat.Event, seat: *@This()) void {
+        // log.debug("hello from Listener", .{});
+        switch (event) {
+            .capabilities => |capabilities| {
+                // log.debug("Capabilities: {}", .{capabilities.capabilities});
+                seat.capabilities = capabilities.capabilities;
+                seat.getDevices() catch unreachable;
+            },
+            .name => |name| {
+                seat.name = name.name;
+                // log.debug("Name: {s}", .{seat.name});
+            },
+        }
+    }
+    pub fn pointerListener(_: *wl.Pointer, event: wl.Pointer.Event, seat: *@This()) void {
+        switch (event) {
+            .motion => |data| {
+                seat.pointer_x = data.surface_x.toInt();
+                seat.pointer_y = data.surface_y.toInt();
+                // log.debug("Pointer Moved: ({},{})", .{ data.surface_x.toInt(), data.surface_y.toInt() });
+            },
+            .enter => |data| {
+                seat.pointer_x = data.surface_x.toInt();
+                seat.pointer_y = data.surface_y.toInt();
+                // log.debug("Pointer Entered: {} ({},{})", .{ data.surface.?, data.surface_x.toInt(), data.surface_y.toInt() });
+            },
+            .leave => {},
+            .button => {},
+            .axis => {},
+            .frame => {},
+            .axis_source => {},
+            .axis_stop => {},
+            .axis_discrete => {},
+        }
+    }
+    pub fn keyboardListener(_: *wl.Keyboard, event: wl.Keyboard.Event, seat: *@This()) void {
+        _ = seat;
+        log.debug("Keyboard Event: {}", .{event});
+    }
+    pub fn touchListener(_: *wl.Touch, event: wl.Touch.Event, seat: *@This()) void {
+        _ = seat;
+        log.debug("Touch Event: {}", .{event});
+    }
+    fn getDevices(self: *@This()) !void {
+        const wl_seat = self.wl_seat;
+        if (self.capabilities.pointer) {
+            self.wl_pointer = try wl_seat.getPointer();
+            self.wl_pointer.?.setListener(*@This(), pointerListener, self);
+        }
+        if (self.capabilities.keyboard) {
+            self.wl_keyboard = try wl_seat.getKeyboard();
+            self.wl_keyboard.?.setListener(*@This(), keyboardListener, self);
+        }
+        if (self.capabilities.touch) {
+            self.wl_touch = try wl_seat.getTouch();
+            self.wl_touch.?.setListener(*@This(), touchListener, self);
+        }
+    }
+};
+
 /// The global context containing everything you might need
 pub const Context = struct {
     display: *wl.Display,
     scheduler: Scheduler,
     compositor: *wl.Compositor = undefined,
     shm: *wl.Shm = undefined,
+    seat: Seat = undefined,
     wm_base: ?*xdg.WmBase = null,
     layer_shell: ?*wlr.LayerShellV1 = null,
     outputs: OutputList,
@@ -175,34 +279,6 @@ pub fn main() !void {
     }
 }
 
-fn outputListener(_: *wl.Output, event: wl.Output.Event, output: *Output) void {
-    // log.debug("hello from Listener", .{});
-    switch (event) {
-        .mode => |mode| {
-            log.debug("Output mode: {}x{}", .{ mode.width, mode.height });
-            output.width = mode.width;
-            output.height = mode.height;
-        },
-        .name => |name| {
-            log.debug("Name: {s}", .{name.name});
-            output.name = name.name;
-        },
-        .geometry => {
-            log.debug("Geometry", .{});
-        },
-        .scale => {
-            log.debug("Scale", .{});
-        },
-        .description => {
-            log.debug("Description", .{});
-        },
-        .done => {
-            log.debug("Output {s}: {}x{}", .{ output.name, output.width, output.height });
-        },
-        // else => {},
-    }
-}
-
 fn layerSurfaceListener(layer_surface: *wlr.LayerSurfaceV1, event: wlr.LayerSurfaceV1.Event, window: *const Window) void {
     switch (event) {
         .configure => |content| {
@@ -230,6 +306,10 @@ fn registryListener(registry: *wl.Registry, event: wl.Registry.Event, context: *
             } else if (std.mem.orderZ(u8, global.interface, wl.Shm.interface.name) == .eq) {
                 context.shm = registry.bind(global.name, wl.Shm, 1) catch return;
                 log.debug("Bound To: {s}", .{global.interface});
+            } else if (std.mem.orderZ(u8, global.interface, wl.Seat.interface.name) == .eq) {
+                context.seat.wl_seat = registry.bind(global.name, wl.Seat, 1) catch return;
+                context.seat.init();
+                log.debug("Bound To: {s}", .{global.interface});
             } else if (std.mem.orderZ(u8, global.interface, xdg.WmBase.interface.name) == .eq) {
                 context.wm_base = registry.bind(global.name, xdg.WmBase, 1) catch return;
                 log.debug("Bound To: {s}", .{global.interface});
@@ -238,7 +318,7 @@ fn registryListener(registry: *wl.Registry, event: wl.Registry.Event, context: *
                 context.outputs.append(Output{
                     .wl_output = wl_output,
                 }) catch return;
-                wl_output.setListener(*Output, outputListener, &context.outputs.items[context.outputs.items.len - 1]);
+                wl_output.setListener(*Output, Output.listener, &context.outputs.items[context.outputs.items.len - 1]);
                 log.debug("Bound To: {s}", .{global.interface});
             } else {
                 // uncomment to see all globals
@@ -262,7 +342,6 @@ const FrameData = struct {
         const time = std.time.timestamp();
         const time_string = c.ctime((&time));
         const time_string_len = std.mem.len(time_string);
-        // log.debug("{} drawing frame {}", .{ @mod(std.time.milliTimestamp(), 60000), self.counter });
         log.debug("{s}: drawing frame {}", .{ time_string[0 .. time_string_len - 1], self.counter });
         self.counter += 1;
         const s = self.surface;

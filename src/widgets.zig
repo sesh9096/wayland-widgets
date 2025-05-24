@@ -38,7 +38,7 @@ pub const Widget = struct {
 
     /// for widgets which are base nodes
     pub fn drawBounding(_: *Widget, surface: *Surface, bounding_box: Rect) !void {
-        log.debug("Default drawing", .{});
+        // log.debug("Default drawing", .{});
         const cr = surface.currentBuffer().cairo_context;
         const thickness = 3;
         cr.setLineWidth(thickness);
@@ -76,7 +76,7 @@ pub const Image = struct {
     pub fn draw(self: *Widget, surface: *Surface, bounding_box: Rect) !void {
         const cr = surface.currentBuffer().cairo_context;
         cr.setSourceSurface(self.getInner(@This()).surface, bounding_box.x, bounding_box.y);
-        log.debug("Drawing image at {} {}", .{ bounding_box.x, bounding_box.y });
+        // log.debug("Drawing image at {} {}", .{ bounding_box.x, bounding_box.y });
         cr.paint();
     }
     pub const vtable = Widget.Vtable{
@@ -100,12 +100,12 @@ pub const Text = struct {
         layout.setFontDescription(font_description);
         layout.setWidth(@intFromFloat(bounding_box.width * pango.SCALE));
         layout.setHeight(@intFromFloat(bounding_box.height * pango.SCALE));
-        const text: *@This() = self.inner.text;
+        const text = self.getInner(@This()).text;
         layout.setText(text, -1);
         cr.setSourceRgb(1, 1, 1);
         cr.moveTo(bounding_box.x, bounding_box.y);
         pango.PangoCairo.showLayout(cr, layout);
-        // log.debug("Drawing text at {} {}", .{ bounding_box.x, bounding_box.y });
+        // log.debug("Drawing text {} at {} {}", .{ text, bounding_box.x, bounding_box.y });
     }
     pub const vtable = Widget.Vtable{
         .draw = draw,
@@ -159,7 +159,7 @@ pub const Box = struct {
         const padding = 3;
         const cr = surface.currentBuffer().cairo_context;
         cr.setLineWidth(border_width);
-        log.debug("Drawing {d}x{d} Box at ({d},{d})", .{ bounding_box.width, bounding_box.height, bounding_box.x, bounding_box.y });
+        // log.debug("Drawing {d}x{d} Box at ({d},{d})", .{ bounding_box.width, bounding_box.height, bounding_box.x, bounding_box.y });
         cr.setSourceRgb(1, 1, 1);
         cr.roundRect(
             bounding_box.x + margin,

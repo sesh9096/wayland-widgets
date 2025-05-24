@@ -17,6 +17,7 @@ pub fn build(b: *std.Build) void {
     scanner.generate("wl_compositor", 1);
     scanner.generate("wl_shm", 2);
     scanner.generate("wl_output", 4);
+    scanner.generate("wl_seat", 7);
     scanner.generate("xdg_wm_base", 3);
     scanner.generate("zwlr_layer_shell_v1", 1);
     // scanner.generate("ext_session_lock_manager_v1", 1);

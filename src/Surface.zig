@@ -35,6 +35,10 @@ fn deinit(self: *@This()) void {
     if (self.shared_memory) |mem| {
         std.posix.munmap(mem);
     }
+    for (self.buffers) |buffer| {
+        buffer.deinit();
+    }
+    self.widget_storage.deinit();
 }
 
 pub fn fromWlSurface(context: Context, wl_surface: *wl.Surface, width: i32, height: i32) !Self {
@@ -110,22 +114,13 @@ pub fn endFrame(self: *Self) void {
     // _ = self.buffers[0].cairo_surf.writeToPng("debug1.png");
     // _ = self.buffers[1].cairo_surf.writeToPng("debug2.png");
     if (self.widget) |widget| {
-        log.debug("Attempting to draw widgets", .{});
+        // log.debug("Attempting to draw widgets", .{});
         widget.vtable.draw(widget, self, widgets.Rect{ .width = @floatFromInt(self.width), .height = @floatFromInt(self.height) }) catch {};
         self.widget = null;
     }
     self.currentBuffer().usable = false;
     self.wl_surface.damage(0, 0, math.maxInt(@TypeOf(self.width)), math.maxInt(@TypeOf(self.height)));
     self.wl_surface.commit();
-}
-
-/// draw widget
-fn drawWidget(self: *Self, widget: widgets.Widget) void {
-    widget.draw(self, .{
-        .width = @floatFromInt(self.width),
-        .height = @floatFromInt(self.height),
-    });
-    self.widget = self.widget.?.parent;
 }
 
 pub fn end(self: *Self, widget: *widgets.Widget) void {
@@ -145,6 +140,7 @@ pub fn getWidget(self: *Self, id_gen: widgets.IdGenerator, T: type) !*widgets.Wi
     const id = id_gen.toId();
     const get_or_put_res = try self.widget_storage.getOrPut(id);
     const widget = if (get_or_put_res.found_existing) get_or_put_res.value_ptr.* else blk: {
+        // log.debug("Created {s} widget with id {}", .{ @typeName(T), id });
         const wid = try widgets.allocateWidget(self.allocator, T);
         get_or_put_res.value_ptr.* = wid;
         const inner: *T = @ptrCast(@alignCast(wid.inner));
@@ -197,7 +193,7 @@ pub fn image(self: *Self, path: [:0]const u8, id_gen: widgets.IdGenerator) !void
 }
 
 pub fn getText(self: *Self, txt: [:0]const u8, id_gen: widgets.IdGenerator) !*widgets.Widget {
-    const widget = try self.getWidget(id_gen, widgets.Image);
+    const widget = try self.getWidget(id_gen, widgets.Text);
     try self.addChildToCurrentWidget(widget);
     widget.getInner(widgets.Text).configure(txt);
     return widget;
