@@ -89,20 +89,27 @@ const OutputList = std.ArrayList(Output);
 const Seat = struct {
     wl_seat: *wl.Seat,
     wl_pointer: ?*wl.Pointer = null,
+    pointer_surface: ?*wl.Surface = null,
     pointer_x: i32 = 0,
     pointer_y: i32 = 0,
     wl_keyboard: ?*wl.Keyboard = null,
     wl_touch: ?*wl.Touch = null,
     capabilities: wl.Seat.Capability = undefined,
     name: [*:0]const u8 = "",
-    fn deinit(self: *@This()) void {
+    // const Capability = packed struct {
+    //     pointer: bool = false,
+    //     keyboard: bool = false,
+    //     touch: bool = false,
+    // };
+    fn deinit(self: *Seat) void {
         self.wl_seat.deinit();
     }
-    fn init(self: *@This()) void {
+    fn init(self: *Seat) void {
         self.wl_seat.setListener(*@This(), listener, self);
     }
-    pub fn listener(_: *wl.Seat, event: wl.Seat.Event, seat: *@This()) void {
-        // log.debug("hello from Listener", .{});
+    pub fn listener(wl_seat: *wl.Seat, event: wl.Seat.Event, seat: *@This()) void {
+        assert(wl_seat == seat.wl_seat);
+        // log.debug("Seat: {*}", .{seat});
         switch (event) {
             .capabilities => |capabilities| {
                 // log.debug("Capabilities: {}", .{capabilities.capabilities});
@@ -115,19 +122,40 @@ const Seat = struct {
             },
         }
     }
-    pub fn pointerListener(_: *wl.Pointer, event: wl.Pointer.Event, seat: *@This()) void {
+    fn getDevices(self: *Seat) !void {
+        const wl_seat = self.wl_seat;
+        if (self.capabilities.pointer) {
+            const wl_pointer = try wl_seat.getPointer();
+            self.wl_pointer = wl_pointer;
+            wl_pointer.setListener(*Seat, pointerListener, self);
+        }
+        if (self.capabilities.keyboard) {
+            const wl_keyboard = try wl_seat.getKeyboard();
+            self.wl_keyboard = wl_keyboard;
+            wl_keyboard.setListener(*Seat, keyboardListener, self);
+        }
+        if (self.capabilities.touch) {
+            const wl_touch = try wl_seat.getTouch();
+            self.wl_touch = wl_touch;
+            wl_touch.setListener(*Seat, touchListener, self);
+        }
+    }
+    pub fn pointerListener(wl_pointer: *wl.Pointer, event: wl.Pointer.Event, seat: *Seat) void {
+        assert(wl_pointer == seat.wl_pointer);
         switch (event) {
             .motion => |data| {
                 seat.pointer_x = data.surface_x.toInt();
                 seat.pointer_y = data.surface_y.toInt();
-                // log.debug("Pointer Moved: ({},{})", .{ data.surface_x.toInt(), data.surface_y.toInt() });
             },
             .enter => |data| {
+                seat.pointer_surface = data.surface;
                 seat.pointer_x = data.surface_x.toInt();
                 seat.pointer_y = data.surface_y.toInt();
-                // log.debug("Pointer Entered: {} ({},{})", .{ data.surface.?, data.surface_x.toInt(), data.surface_y.toInt() });
             },
-            .leave => {},
+            .leave => |data| {
+                assert(data.surface == seat.pointer_surface);
+                seat.pointer_surface = null;
+            },
             .button => {},
             .axis => {},
             .frame => {},
@@ -136,28 +164,13 @@ const Seat = struct {
             .axis_discrete => {},
         }
     }
-    pub fn keyboardListener(_: *wl.Keyboard, event: wl.Keyboard.Event, seat: *@This()) void {
+    pub fn keyboardListener(_: *wl.Keyboard, event: wl.Keyboard.Event, seat: *Seat) void {
         _ = seat;
         log.debug("Keyboard Event: {}", .{event});
     }
-    pub fn touchListener(_: *wl.Touch, event: wl.Touch.Event, seat: *@This()) void {
+    pub fn touchListener(_: *wl.Touch, event: wl.Touch.Event, seat: *Seat) void {
         _ = seat;
         log.debug("Touch Event: {}", .{event});
-    }
-    fn getDevices(self: *@This()) !void {
-        const wl_seat = self.wl_seat;
-        if (self.capabilities.pointer) {
-            self.wl_pointer = try wl_seat.getPointer();
-            self.wl_pointer.?.setListener(*@This(), pointerListener, self);
-        }
-        if (self.capabilities.keyboard) {
-            self.wl_keyboard = try wl_seat.getKeyboard();
-            self.wl_keyboard.?.setListener(*@This(), keyboardListener, self);
-        }
-        if (self.capabilities.touch) {
-            self.wl_touch = try wl_seat.getTouch();
-            self.wl_touch.?.setListener(*@This(), touchListener, self);
-        }
     }
 };
 
@@ -167,7 +180,7 @@ pub const Context = struct {
     scheduler: Scheduler,
     compositor: *wl.Compositor = undefined,
     shm: *wl.Shm = undefined,
-    seat: Seat = undefined,
+    seat: Seat = .{ .wl_seat = undefined },
     wm_base: ?*xdg.WmBase = null,
     layer_shell: ?*wlr.LayerShellV1 = null,
     outputs: OutputList,
@@ -185,21 +198,22 @@ pub const Context = struct {
         self.display.disconnect();
     }
     pub fn init(allocator: Allocator) !@This() {
-        const display = try wl.Display.connect(null);
-        const registry = try display.getRegistry();
-        var context = @This(){
+        return @This(){
             .allocator = allocator,
-            .display = display,
+            .display = try wl.Display.connect(null),
             .outputs = OutputList.init(allocator),
             .scheduler = Scheduler.init(allocator),
         };
+    }
 
-        registry.setListener(*Context, registryListener, &context);
+    pub fn getGlobals(self: *@This()) !void {
+        const registry = try self.display.getRegistry();
+        defer registry.destroy();
+        registry.setListener(*Context, registryListener, self);
         // gather context
-        if (display.roundtrip() != .SUCCESS) return error.RoundtripFailed;
+        if (self.display.roundtrip() != .SUCCESS) return error.RoundtripFailed;
         // gather output info
-        if (display.roundtrip() != .SUCCESS) return error.RoundtripFailed;
-        return context;
+        if (self.display.roundtrip() != .SUCCESS) return error.RoundtripFailed;
     }
     pub fn displayFd(self: *const @This()) c_int {
         return self.display.getFd();
@@ -213,6 +227,8 @@ pub fn main() !void {
     // var fba = std.heap.FixedBufferAllocator.init(&buf);
     // const allocator = fba.allocator();
     var context = try Context.init(allocator);
+    defer context.destroy();
+    try context.getGlobals();
 
     const options = Options.parseArgs();
     _ = options;
@@ -237,6 +253,7 @@ pub fn main() !void {
     var frame_data = FrameData{
         .buf = &text_buf,
         .surface = &surface,
+        .seat = &context.seat,
     };
     const scheduler = &context.scheduler;
     try scheduler.addRepeatTask(Task.create(*FrameData, FrameData.timerTask, &frame_data), 1000);
@@ -333,6 +350,7 @@ const FrameData = struct {
     buf: []u8,
     counter: u32 = 0,
     surface: *Surface,
+    seat: *Seat,
     pub fn timerTask(self: *FrameData) void {
         self.frame() catch unreachable;
     }
@@ -365,7 +383,14 @@ const FrameData = struct {
             s.end(innerbox4);
             const timestring = std.fmt.bufPrintZ(self.buf, "{s}", .{time_string[0 .. time_string_len - 1]}) catch unreachable;
             try s.text(timestring, .{ .src = @src() });
-            try s.text("Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.", .{ .src = @src() });
+            if (self.seat.wl_pointer) |_| {
+                var buf: [16]u8 = undefined;
+                const seat = self.seat;
+                const coords = std.fmt.bufPrintZ(&buf, "({},{})", .{ seat.pointer_x, seat.pointer_y }) catch unreachable;
+                try s.text(coords, .{ .src = @src() });
+            } else {
+                try s.text("Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.", .{ .src = @src() });
+            }
             // s.drawWidget(.{ .image = self.image_widget });
             // s.drawWidget(.{ .text = self.text_widget });
             // s.drawWidget(.{ .box = self.box_widget });
