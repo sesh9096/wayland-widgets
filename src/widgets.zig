@@ -1,5 +1,6 @@
 const std = @import("std");
 const log = std.log;
+const math = std.math;
 const assert = std.debug.assert;
 const SourceLocation = std.builtin.SourceLocation;
 const cairo = @import("./cairo.zig");
@@ -46,8 +47,8 @@ pub const Widget = struct {
         cr.roundRect(
             bounding_box.x,
             bounding_box.y,
-            bounding_box.width,
-            bounding_box.height,
+            bounding_box.w,
+            bounding_box.h,
             10,
         );
     }
@@ -98,8 +99,8 @@ pub const Text = struct {
         defer layout.free();
         defer font_description.free();
         layout.setFontDescription(font_description);
-        layout.setWidth(@intFromFloat(bounding_box.width * pango.SCALE));
-        layout.setHeight(@intFromFloat(bounding_box.height * pango.SCALE));
+        layout.setWidth(@intFromFloat(bounding_box.w * pango.SCALE));
+        layout.setHeight(@intFromFloat(bounding_box.h * pango.SCALE));
         const text = self.getInner(@This()).text;
         layout.setText(text, -1);
         cr.setSourceRgb(1, 1, 1);
@@ -164,8 +165,8 @@ pub const Box = struct {
         cr.roundRect(
             bounding_box.x + margin,
             bounding_box.y + margin,
-            bounding_box.width - margin * 2,
-            bounding_box.height - margin * 2,
+            bounding_box.w - margin * 2,
+            bounding_box.h - margin * 2,
             4,
         );
 
@@ -177,14 +178,14 @@ pub const Box = struct {
                 var child_box = Rect{
                     .x = bounding_box.x + spacing,
                     .y = bounding_box.y + spacing,
-                    .width = 0,
-                    .height = bounding_box.height - spacing * 2,
+                    .w = 0,
+                    .h = bounding_box.h - spacing * 2,
                 };
-                const scale = (bounding_box.width - spacing * 2) / @as(f32, @floatFromInt(box.children.items.len));
+                const scale = (bounding_box.w - spacing * 2) / @as(f32, @floatFromInt(box.children.items.len));
                 for (box.children.items) |child| {
                     const weight = 1;
-                    child_box.x = child_box.x + child_box.width;
-                    child_box.width = scale * weight;
+                    child_box.x = child_box.x + child_box.w;
+                    child_box.w = scale * weight;
                     try child.vtable.draw(child, surface, child_box);
                 }
             },
@@ -194,14 +195,14 @@ pub const Box = struct {
                 var child_box = Rect{
                     .x = bounding_box.x + spacing,
                     .y = bounding_box.y + spacing,
-                    .width = bounding_box.width - spacing * 2,
-                    .height = 0,
+                    .w = bounding_box.w - spacing * 2,
+                    .h = 0,
                 };
-                const scale = (bounding_box.height - spacing * 2) / @as(f32, @floatFromInt(box.children.items.len));
+                const scale = (bounding_box.h - spacing * 2) / @as(f32, @floatFromInt(box.children.items.len));
                 for (box.children.items) |child| {
                     const weight = 1;
-                    child_box.y = child_box.y + child_box.height;
-                    child_box.height = scale * weight;
+                    child_box.y = child_box.y + child_box.h;
+                    child_box.h = scale * weight;
                     try child.vtable.draw(child, surface, child_box);
                 }
             },
@@ -228,8 +229,23 @@ pub const Box = struct {
 pub const Rect = struct {
     x: f32 = 0,
     y: f32 = 0,
-    width: f32 = 0,
-    height: f32 = 0,
+    w: f32 = 0,
+    h: f32 = 0,
+    pub const inf = Rect{
+        .x = -math.inf(f32),
+        .y = -math.inf(f32),
+        .w = math.inf(f32),
+        .h = math.inf(f32),
+    };
+    pub fn area(self: *const Rect) f32 {
+        return self.w * self.h;
+    }
+    pub fn isEmpty(self: *const Rect) bool {
+        return self.w <= 0 or self.h <= 0;
+    }
+    pub fn overlap(self: *const Rect, r: Rect) Rect {
+        return Rect{};
+    }
 };
 
 /// Config for generating Id's, use `.id` for direct control or `.src` and optionally `.extra`

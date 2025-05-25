@@ -86,7 +86,7 @@ const Output = struct {
 
 const OutputList = std.ArrayList(Output);
 
-const Seat = struct {
+pub const Seat = struct {
     wl_seat: *wl.Seat,
     wl_pointer: ?*wl.Pointer = null,
     pointer_surface: ?*wl.Surface = null,
@@ -94,7 +94,6 @@ const Seat = struct {
     pointer_y: i32 = 0,
     wl_keyboard: ?*wl.Keyboard = null,
     wl_touch: ?*wl.Touch = null,
-    capabilities: wl.Seat.Capability = undefined,
     name: [*:0]const u8 = "",
     // const Capability = packed struct {
     //     pointer: bool = false,
@@ -113,8 +112,7 @@ const Seat = struct {
         switch (event) {
             .capabilities => |capabilities| {
                 // log.debug("Capabilities: {}", .{capabilities.capabilities});
-                seat.capabilities = capabilities.capabilities;
-                seat.getDevices() catch unreachable;
+                seat.getDevices(capabilities.capabilities) catch unreachable;
             },
             .name => |name| {
                 seat.name = name.name;
@@ -122,19 +120,19 @@ const Seat = struct {
             },
         }
     }
-    fn getDevices(self: *Seat) !void {
+    fn getDevices(self: *Seat, capabilities: wl.Seat.Capability) !void {
         const wl_seat = self.wl_seat;
-        if (self.capabilities.pointer) {
+        if (capabilities.pointer) {
             const wl_pointer = try wl_seat.getPointer();
             self.wl_pointer = wl_pointer;
             wl_pointer.setListener(*Seat, pointerListener, self);
         }
-        if (self.capabilities.keyboard) {
+        if (capabilities.keyboard) {
             const wl_keyboard = try wl_seat.getKeyboard();
             self.wl_keyboard = wl_keyboard;
             wl_keyboard.setListener(*Seat, keyboardListener, self);
         }
-        if (self.capabilities.touch) {
+        if (capabilities.touch) {
             const wl_touch = try wl_seat.getTouch();
             self.wl_touch = wl_touch;
             wl_touch.setListener(*Seat, touchListener, self);
@@ -245,7 +243,7 @@ pub fn main() !void {
     const output = context.outputs.items[0];
     const window = &windows.items[0];
     var surface = try output.initLayerSurface(context, window);
-    surface.registerListeners();
+    surface.setListeners();
     if (context.display.dispatch() != .SUCCESS) return error.DispatchFailed;
 
     var text_buf: [1024]u8 = undefined;

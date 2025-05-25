@@ -4,13 +4,16 @@ const std = @import("std");
 const log = std.log;
 const math = std.math;
 const assert = std.debug.assert;
-const Context = @import("./main.zig").Context;
+const main = @import("./main.zig");
+const Context = main.Context;
+const Seat = main.Seat;
 const wayland = @import("wayland");
 const wl = wayland.client.wl;
 const xdg = wayland.client.xdg;
 const wlr = wayland.client.zwlr;
 const cairo = @import("./cairo.zig");
 const widgets = @import("./widgets.zig");
+const Rect = widgets.Rect;
 const WidgetFromId = std.AutoHashMap(u32, *widgets.Widget);
 
 wl_surface: *wl.Surface,
@@ -22,6 +25,8 @@ current_buffer: u1 = 0,
 widget: ?*widgets.Widget = null,
 widget_storage: WidgetFromId,
 allocator: std.mem.Allocator,
+seat: *const Seat,
+redraw: Rect = .{},
 
 const Self = @This();
 
@@ -70,6 +75,7 @@ pub fn fromWlSurface(context: Context, wl_surface: *wl.Surface, width: i32, heig
         .shared_memory = pool,
         .widget_storage = WidgetFromId.init(allocator),
         .allocator = allocator,
+        .seat = &context.seat,
         .buffers = .{
             Buffer{
                 .wl_buffer = try shm_pool.createBuffer(0, width, height, width * 4, .xrgb8888),
@@ -88,8 +94,8 @@ pub fn fromWlSurface(context: Context, wl_surface: *wl.Surface, width: i32, heig
     // const buffer = try shm_pool.createBuffer(0, width, height, width * 4, .xrgb8888);
 }
 
-/// register handlers
-pub fn registerListeners(self: *Self) void {
+/// set listeners
+pub fn setListeners(self: *Self) void {
     self.buffers[0].wl_buffer.setListener(*Buffer, Buffer.bufferListener, &self.buffers[0]);
     self.buffers[1].wl_buffer.setListener(*Buffer, Buffer.bufferListener, &self.buffers[1]);
     self.wl_surface.setListener(*Self, surfaceListener, self);
@@ -115,7 +121,7 @@ pub fn endFrame(self: *Self) void {
     // _ = self.buffers[1].cairo_surf.writeToPng("debug2.png");
     if (self.widget) |widget| {
         // log.debug("Attempting to draw widgets", .{});
-        widget.vtable.draw(widget, self, widgets.Rect{ .width = @floatFromInt(self.width), .height = @floatFromInt(self.height) }) catch {};
+        widget.vtable.draw(widget, self, widgets.Rect{ .w = @floatFromInt(self.width), .h = @floatFromInt(self.height) }) catch {};
         self.widget = null;
     }
     self.currentBuffer().usable = false;
