@@ -243,8 +243,17 @@ pub const Rect = struct {
     pub fn isEmpty(self: *const Rect) bool {
         return self.w <= 0 or self.h <= 0;
     }
-    pub fn overlap(self: *const Rect, r: Rect) Rect {
-        return Rect{};
+    pub fn overlap(a: Rect, b: Rect) Rect {
+        // copied from dvui
+        const ax2 = a.x + a.w;
+        const ay2 = a.y + a.h;
+        const bx2 = b.x + b.w;
+        const by2 = b.y + b.h;
+        const x = @max(a.x, b.x);
+        const y = @max(a.y, b.y);
+        const x2 = @min(ax2, bx2);
+        const y2 = @min(ay2, by2);
+        return Rect{ .x = x, .y = y, .w = @max(0, x2 - x), .h = @max(0, y2 - y) };
     }
 };
 
