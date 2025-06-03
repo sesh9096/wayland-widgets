@@ -1,0 +1,22 @@
+#+title: Experiments in Wayland
+
+*WIP*
+
+A system monitor and widgets using wayland protocols
+
+Dependencies:
+- cairo
+- pango
+- zig-wayland
+* Implementation
+To create a surface:
+1. Create Context
+2. Generate Surfaces
+3. Draw Widgets
+** Frame
+1. Handle Input events
+   1. Reset input state
+   2. apply input events to widgets
+2. Reset Widgets in Surface
+3. Create widgets
+4. Draw to Surface

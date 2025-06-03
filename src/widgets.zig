@@ -6,11 +6,7 @@ const SourceLocation = std.builtin.SourceLocation;
 const cairo = @import("./cairo.zig");
 const pango = @import("./pango.zig");
 const Surface = @import("./Surface.zig");
-// const c = @cImport({
-//     @cInclude("freetype/freetype.h");
-// });
-
-// var ft_library: c.FT_Library = null;
+const Input = Surface.Input;
 pub const Widget = struct {
     // pub const Inner = union(enum) {
     //     image: *Image,
@@ -19,8 +15,17 @@ pub const Widget = struct {
     //     overlay: *Overlay,
     // };
     pub const Vtable = struct {
-        addChild: *const fn (self: *Widget, child: *Widget) (anyerror || AddChildError)!void = addChildNotAllowed,
+        /// add a child to the widget
+        addChild: *const fn (self: *Widget, child: *Widget) (std.mem.Allocator.Error || AddChildError)!void = addChildNotAllowed,
+        /// List all children, useful for debugging and to find a widget at a certain point
+        /// children should be in ordered so those on top should be at the end
+        getChildren: *const fn (self: *Widget) []*Widget = getChildrenNone,
+        /// draw the widget on the surface
         draw: *const fn (self: *Widget, surface: *Surface, bounding_box: Rect) anyerror!void = drawBounding,
+        /// handle input, call the corresponding function on parent if not handled
+        handleInput: *const fn (self: *Widget, input: *Input) anyerror!void = handleInputDefault,
+        /// Propose a size to the parent, can check children first if desired
+        proposeSize: *const fn (self: *Widget) Point = proposeSizeNull,
     };
     // inner: Inner,
     inner: *anyopaque,
@@ -38,6 +43,13 @@ pub const Widget = struct {
     }
 
     /// for widgets which are base nodes
+    pub fn getChildrenNone(_: *Widget) []*Widget {
+        // don't try to dereference this
+        var ret: []*Widget = undefined;
+        return ret[0..0];
+    }
+
+    /// for widgets which are base nodes
     pub fn drawBounding(_: *Widget, surface: *Surface, bounding_box: Rect) !void {
         // log.debug("Default drawing", .{});
         const cr = surface.currentBuffer().cairo_context;
@@ -51,6 +63,16 @@ pub const Widget = struct {
             bounding_box.h,
             10,
         );
+    }
+
+    /// send input to parent
+    pub fn handleInputDefault(widget: *Widget, input: *Input) !void {
+        return if (widget != widget.parent) widget.parent.vtable.handleInput(widget.parent, input);
+    }
+
+    /// send input to parent
+    pub fn proposeSizeNull(_: *Widget) Point {
+        return Point{};
     }
 };
 const WidgetList = std.ArrayList(*Widget);
@@ -225,7 +247,64 @@ pub const Box = struct {
     }
 };
 // pub const Style = struct {};
+pub const Button = struct {
+    child: ?*Widget,
+    clicked: bool = false,
+    fn draw(self: *Widget, surface: *Surface, bounding_box: Rect) !void {
+        // draw itself
+        const border_width = 2;
+        const margin = 2;
+        const cr = surface.currentBuffer().cairo_context;
+        cr.setLineWidth(border_width);
+        // log.debug("Drawing {d}x{d} Box at ({d},{d})", .{ bounding_box.width, bounding_box.height, bounding_box.x, bounding_box.y });
+        cr.setSourceRgb(1, 1, 1);
+        cr.roundRect(
+            bounding_box.x + margin,
+            bounding_box.y + margin,
+            bounding_box.w - margin * 2,
+            bounding_box.h - margin * 2,
+            4,
+        );
+        try self.child.vtable.draw(self.child, surface, bounding_box.subtractSpacing(margin, margin));
+    }
+    pub fn addChild(self: *Widget, child: *Widget) !void {
+        // log.debug("adding child", .{});
+        if (self.getInner(@This()).child) |child_ptr| {
+            child_ptr = child;
+        }
+    }
+    pub fn handleInput(self: *Widget, input: *Input) !void {
+        const child = self.getInner(@This()).child;
+        const pointer = input.pointer;
+        if (!pointer.handled) {
+            // let child handle things first
+            if (child != null and pointer.in(child.rect)) child.vtable.handleInput(child, input);
+            // child might have handled things
+            if (!pointer.handled and pointer.in(self.rect)) {
+                // button press finished
+                if (pointer.button == .left and pointer.state == .released) {
+                    self.clicked = true;
+                }
+            }
+        }
+        return if (self != self.parent) self.parent.vtable.handleInput(self.parent, input);
+    }
+    pub const vtable = Widget.Vtable{
+        .draw = draw,
+        .addChild = addChild,
+    };
+    pub fn configure(self: *Button) void {
+        self.child = null;
+    }
+};
 
+pub const Point = struct {
+    x: f32 = 0,
+    y: f32 = 0,
+    pub fn in(self: *const Point, rect: Rect) bool {
+        return (self.x >= rect.x and self.y >= rect.y) and (self.x <= (rect.x + rect.w) and self.y <= (rect.y + rect.h));
+    }
+};
 pub const Rect = struct {
     x: f32 = 0,
     y: f32 = 0,
@@ -254,6 +333,15 @@ pub const Rect = struct {
         const x2 = @min(ax2, bx2);
         const y2 = @min(ay2, by2);
         return Rect{ .x = x, .y = y, .w = @max(0, x2 - x), .h = @max(0, y2 - y) };
+    }
+
+    pub fn subtractSpacing(self: Rect, w: f32, h: f32) Rect {
+        return Rect{
+            self.x + w,
+            self.y + h,
+            self.w - w * 2,
+            self.h - h * 2,
+        };
     }
 };
 

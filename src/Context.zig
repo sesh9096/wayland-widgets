@@ -19,7 +19,7 @@ display: *wl.Display,
 scheduler: Scheduler,
 compositor: *wl.Compositor = undefined,
 shm: *wl.Shm = undefined,
-seat: Seat = .{ .wl_seat = undefined },
+seat: Seat = undefined,
 wm_base: ?*xdg.WmBase = null,
 layer_shell: ?*wlr.LayerShellV1 = null,
 outputs: OutputList,
@@ -32,6 +32,7 @@ pub fn init(allocator: Allocator) !@This() {
         .display = try wl.Display.connect(null),
         .outputs = OutputList.init(allocator),
         .scheduler = Scheduler.init(allocator),
+        .seat = .{ .wl_seat = undefined, .surfaces = Seat.Surfaces.init(allocator) },
     };
 }
 
@@ -117,7 +118,7 @@ const Output = struct {
     fn deinit(self: *@This()) void {
         self.wl_output.deinit();
     }
-    pub fn initLayerSurface(self: @This(), context: Context, window: *const Window) !Surface {
+    pub fn initLayerSurface(self: @This(), context: *Context, window: *const Window) !Surface {
         const display = context.display;
         const compositor = context.compositor;
         const layer_shell = context.layer_shell orelse return error.NoZwlrLayerShell;
@@ -167,10 +168,9 @@ const OutputList = std.ArrayList(Output);
 
 pub const Seat = struct {
     wl_seat: *wl.Seat,
+    surfaces: Surfaces = undefined,
     wl_pointer: ?*wl.Pointer = null,
-    pointer_surface: ?*wl.Surface = null,
-    pointer_x: i32 = 0,
-    pointer_y: i32 = 0,
+    pointer_surface: ?*Surface = null,
     wl_keyboard: ?*wl.Keyboard = null,
     wl_touch: ?*wl.Touch = null,
     name: [*:0]const u8 = "",
@@ -179,6 +179,7 @@ pub const Seat = struct {
     //     keyboard: bool = false,
     //     touch: bool = false,
     // };
+    const Surfaces = std.ArrayList(*Surface);
     fn deinit(self: *Seat) void {
         self.wl_seat.deinit();
     }
@@ -217,28 +218,34 @@ pub const Seat = struct {
             wl_touch.setListener(*Seat, touchListener, self);
         }
     }
+    pub fn registerSurface(self: *Seat, surface: *Surface) !void {
+        try self.surfaces.append(surface);
+    }
+    pub fn getSurface(self: *Seat, wl_surface: *wl.Surface) !*Surface {
+        for (self.surfaces.items) |surface| {
+            if (surface.wl_surface == wl_surface) {
+                return surface;
+            }
+        }
+        log.err("Surface {*} not registered with seat", .{wl_surface});
+        return error.SurfaceNotRegistered;
+    }
     pub fn pointerListener(wl_pointer: *wl.Pointer, event: wl.Pointer.Event, seat: *Seat) void {
+        // main input logic handled by Surface
         assert(wl_pointer == seat.wl_pointer);
         switch (event) {
-            .motion => |data| {
-                seat.pointer_x = data.surface_x.toInt();
-                seat.pointer_y = data.surface_y.toInt();
-            },
             .enter => |data| {
-                seat.pointer_surface = data.surface;
-                seat.pointer_x = data.surface_x.toInt();
-                seat.pointer_y = data.surface_y.toInt();
+                seat.pointer_surface = seat.getSurface(data.surface.?) catch unreachable;
+                seat.pointer_surface.?.notify(event);
             },
             .leave => |data| {
-                assert(data.surface == seat.pointer_surface);
+                assert(data.surface == seat.pointer_surface.?.wl_surface);
+                seat.pointer_surface.?.notify(event);
                 seat.pointer_surface = null;
             },
-            .button => {},
-            .axis => {},
-            .frame => {},
-            .axis_source => {},
-            .axis_stop => {},
-            .axis_discrete => {},
+            else => {
+                seat.pointer_surface.?.notify(event);
+            },
         }
     }
     pub fn keyboardListener(_: *wl.Keyboard, event: wl.Keyboard.Event, seat: *Seat) void {

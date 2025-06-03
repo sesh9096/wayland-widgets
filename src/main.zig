@@ -57,8 +57,8 @@ pub fn main() !void {
 
     const output = context.outputs.items[0];
     const window = &windows.items[0];
-    var surface = try output.initLayerSurface(context, window);
-    surface.setListeners();
+    var surface = try output.initLayerSurface(&context, window);
+    try surface.setListeners();
     if (context.display.dispatch() != .SUCCESS) return error.DispatchFailed;
 
     var text_buf: [1024]u8 = undefined;
@@ -147,9 +147,8 @@ const FrameData = struct {
             const timestring = std.fmt.bufPrintZ(self.buf, "{s}", .{time_string[0 .. time_string_len - 1]}) catch unreachable;
             try s.text(timestring, .{ .src = @src() });
             if (self.seat.wl_pointer) |_| {
-                var buf: [16]u8 = undefined;
-                const seat = self.seat;
-                const coords = std.fmt.bufPrintZ(&buf, "({},{})", .{ seat.pointer_x, seat.pointer_y }) catch unreachable;
+                var buf: [64]u8 = undefined;
+                const coords = std.fmt.bufPrintZ(&buf, "({[x]d},{[y]d})", s.input.pointer.pos) catch unreachable;
                 try s.text(coords, .{ .src = @src() });
             } else {
                 try s.text("Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.", .{ .src = @src() });

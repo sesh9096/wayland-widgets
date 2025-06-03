@@ -13,8 +13,13 @@ const xdg = wayland.client.xdg;
 const wlr = wayland.client.zwlr;
 const cairo = @import("./cairo.zig");
 const widgets = @import("./widgets.zig");
+const Widget = widgets.Widget;
 const Rect = widgets.Rect;
-const WidgetFromId = std.AutoHashMap(u32, *widgets.Widget);
+const Point = widgets.Point;
+const WidgetFromId = std.AutoHashMap(u32, *Widget);
+const c = @cImport({
+    @cInclude("linux/input-event-codes.h");
+});
 
 wl_surface: *wl.Surface,
 shared_memory: []align(std.mem.page_size) u8,
@@ -22,11 +27,57 @@ width: i32,
 height: i32,
 buffers: [2]Buffer,
 current_buffer: u1 = 0,
-widget: ?*widgets.Widget = null,
+widget: ?*Widget = null,
 widget_storage: WidgetFromId,
 allocator: std.mem.Allocator,
-seat: *const Seat,
+seat: *Seat,
 redraw: Rect = .{},
+
+// event handling
+input: Input = .{},
+pub const Input = struct {
+    pointer: Pointer = .{},
+    // keyboard: void,
+    // touch: void,
+    const Pointer = struct {
+        pos: Point = .{},
+        button: ?Button = null,
+        focused: bool = false,
+        handled: bool = false,
+        state: KeyState = .up,
+        pub fn in(self: *Pointer, rect: Rect) bool {
+            self.pos.in(rect);
+        }
+    };
+    pub const Button = enum {
+        left,
+        right,
+        middle,
+        side,
+        extra,
+        forward,
+        back,
+        task,
+    };
+    pub fn reset(self: *Input) void {
+        self.pointer.handled = if (self.pointer.focused) false else true;
+    }
+    pub const KeyState = enum {
+        up,
+        pressed,
+        down,
+        released,
+        pub fn reset(self: *KeyState) void {
+            self = .up;
+        }
+        pub fn transition(self: *KeyState, event: anytype) void {
+            self = switch (self) {
+                .up, .released => if (event == .pressed) .pressed else .up,
+                .pressed, .down => if (event == .released) .released else .down,
+            };
+        }
+    };
+};
 
 const Self = @This();
 
@@ -46,7 +97,7 @@ fn deinit(self: *@This()) void {
     self.widget_storage.deinit();
 }
 
-pub fn fromWlSurface(context: Context, wl_surface: *wl.Surface, width: i32, height: i32) !Self {
+pub fn fromWlSurface(context: *Context, wl_surface: *wl.Surface, width: i32, height: i32) !Self {
     const allocator = context.allocator;
     const shm = context.shm;
     const shm_fd = try std.posix.memfd_create("shared_memory_buffer", 0);
@@ -95,10 +146,97 @@ pub fn fromWlSurface(context: Context, wl_surface: *wl.Surface, width: i32, heig
 }
 
 /// set listeners
-pub fn setListeners(self: *Self) void {
+pub fn setListeners(self: *Self) !void {
     self.buffers[0].wl_buffer.setListener(*Buffer, Buffer.bufferListener, &self.buffers[0]);
     self.buffers[1].wl_buffer.setListener(*Buffer, Buffer.bufferListener, &self.buffers[1]);
     self.wl_surface.setListener(*Self, surfaceListener, self);
+    try self.seat.registerSurface(self);
+}
+pub fn notify(self: *Self, event: anytype) void {
+    const eventType = @TypeOf(event);
+    if (eventType == wl.Pointer.Event) {
+        const pointer = &self.input.pointer;
+        switch (event) {
+            .enter => |data| {
+                assert(data.surface == self.wl_surface);
+                pointer.pos = .{
+                    .x = @floatCast(data.surface_x.toDouble()),
+                    .y = @floatCast(data.surface_y.toDouble()),
+                };
+                pointer.focused = true;
+            },
+            .leave => |data| {
+                assert(data.surface == self.wl_surface);
+                pointer.focused = false;
+            },
+            .motion => |data| {
+                pointer.pos = .{
+                    .x = @floatCast(data.surface_x.toDouble()),
+                    .y = @floatCast(data.surface_y.toDouble()),
+                };
+            },
+            .button => |data| {
+                const btn: ?Input.Button = switch (data.button) {
+                    c.BTN_LEFT => .left,
+                    c.BTN_RIGHT => .right,
+                    c.BTN_MIDDLE => .middle,
+                    c.BTN_SIDE => .side,
+                    c.BTN_EXTRA => .extra,
+                    c.BTN_FORWARD => .forward,
+                    c.BTN_BACK => .back,
+                    c.BTN_TASK => .task,
+                    else => blk: {
+                        log.warn("Button 0x{x} not supported", .{data.button});
+                        break :blk null;
+                    },
+                };
+                switch (data.state) {
+                    .pressed => {
+                        pointer.button = btn;
+                    },
+                    .released => {
+                        if (pointer.button == btn) {
+                            pointer.button = null;
+                        }
+                    },
+                    _ => unreachable,
+                }
+            },
+            else => |data| {
+                log.warn("Unsupported event: {}", .{data});
+            },
+        }
+    }
+}
+
+pub fn getDeepestWidgetAtPoint(self: *Self, point: Point) ?*Widget {
+    if (self.widget) |initial_widget| {
+        var widget = initial_widget;
+        for (1..1000) |_| { // No Infinite Loops
+            const children = widget.vtable.getChildren(widget);
+            for (0..children.len) |from_end| {
+                const i = children.len - from_end - 1;
+                if (point.in(children[i].rect)) {
+                    widget = children[i];
+                    break;
+                }
+            }
+            return widget;
+        }
+        unreachable;
+    } else {
+        return null;
+    }
+}
+
+/// Send inputs to the relevant widgets
+pub fn handleInputs(self: *Self) void {
+    if (self.input.pointer.focused) {
+        if (self.getDeepestWidgetAtPoint(self.input.pointer.pos)) |widget| {
+            widget.vtable.handleInput(widget, &self.input) catch {};
+        }
+    }
+    // TODO: Keyboard inputs
 }
 
 pub fn currentBuffer(self: *Self) *Buffer {
@@ -122,6 +260,7 @@ pub fn endFrame(self: *Self) void {
     if (self.widget) |widget| {
         // log.debug("Attempting to draw widgets", .{});
         widget.vtable.draw(widget, self, widgets.Rect{ .w = @floatFromInt(self.width), .h = @floatFromInt(self.height) }) catch {};
+        self.handleInputs();
         self.widget = null;
     }
     self.currentBuffer().usable = false;
@@ -129,12 +268,12 @@ pub fn endFrame(self: *Self) void {
     self.wl_surface.commit();
 }
 
-pub fn end(self: *Self, widget: *widgets.Widget) void {
+pub fn end(self: *Self, widget: *Widget) void {
     assert(widget == self.widget);
     self.widget = widget.parent;
 }
 
-fn addChildToCurrentWidget(self: *Self, widget: *widgets.Widget) !void {
+fn addChildToCurrentWidget(self: *Self, widget: *Widget) !void {
     if (self.widget) |parent| {
         widget.parent = parent;
         try parent.vtable.addChild(parent, widget);
@@ -142,7 +281,7 @@ fn addChildToCurrentWidget(self: *Self, widget: *widgets.Widget) !void {
         widget.parent = widget;
     }
 }
-pub fn getWidget(self: *Self, id_gen: widgets.IdGenerator, T: type) !*widgets.Widget {
+pub fn getWidget(self: *Self, id_gen: widgets.IdGenerator, T: type) !*Widget {
     const id = id_gen.toId();
     const get_or_put_res = try self.widget_storage.getOrPut(id);
     const widget = if (get_or_put_res.found_existing) get_or_put_res.value_ptr.* else blk: {
@@ -157,7 +296,7 @@ pub fn getWidget(self: *Self, id_gen: widgets.IdGenerator, T: type) !*widgets.Wi
     return widget;
 }
 
-pub fn getBox(self: *Self, direction: widgets.Direction, id_gen: widgets.IdGenerator) !*widgets.Widget {
+pub fn getBox(self: *Self, direction: widgets.Direction, id_gen: widgets.IdGenerator) !*Widget {
     const widget = try self.getWidget(id_gen, widgets.Box);
     widget.getInner(widgets.Box).configure(direction);
 
@@ -166,25 +305,25 @@ pub fn getBox(self: *Self, direction: widgets.Direction, id_gen: widgets.IdGener
     self.widget = widget;
     return widget;
 }
-pub fn box(self: *Self, direction: widgets.Direction, id_gen: widgets.IdGenerator) !*widgets.Widget {
+pub fn box(self: *Self, direction: widgets.Direction, id_gen: widgets.IdGenerator) !*Widget {
     const widget = try self.getBox(direction, id_gen);
     self.widget = widget;
     return widget;
 }
 
-pub fn getOverlay(self: *Self, id_gen: widgets.IdGenerator) !*widgets.Widget {
+pub fn getOverlay(self: *Self, id_gen: widgets.IdGenerator) !*Widget {
     const widget = try self.getWidget(id_gen, widgets.Overlay);
     widget.getInner(widgets.Overlay).configure();
     try self.addChildToCurrentWidget(widget);
     return widget;
 }
-pub fn overlay(self: *Self, id_gen: widgets.IdGenerator) !*widgets.Widget {
+pub fn overlay(self: *Self, id_gen: widgets.IdGenerator) !*Widget {
     const widget = try self.getOverlay(id_gen);
     self.widget = widget;
     return widget;
 }
 
-pub fn getImage(self: *Self, path: [:0]const u8, id_gen: widgets.IdGenerator) !*widgets.Widget {
+pub fn getImage(self: *Self, path: [:0]const u8, id_gen: widgets.IdGenerator) !*Widget {
     const surface = cairo.Surface.createFromPng(path);
     if (surface.status() != .SUCCESS) {
         log.warn("{}", .{surface.status()});
@@ -198,7 +337,7 @@ pub fn image(self: *Self, path: [:0]const u8, id_gen: widgets.IdGenerator) !void
     _ = try self.getImage(path, id_gen);
 }
 
-pub fn getText(self: *Self, txt: [:0]const u8, id_gen: widgets.IdGenerator) !*widgets.Widget {
+pub fn getText(self: *Self, txt: [:0]const u8, id_gen: widgets.IdGenerator) !*Widget {
     const widget = try self.getWidget(id_gen, widgets.Text);
     try self.addChildToCurrentWidget(widget);
     widget.getInner(widgets.Text).configure(txt);
