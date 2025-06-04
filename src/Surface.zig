@@ -14,8 +14,9 @@ const wlr = wayland.client.zwlr;
 const cairo = @import("./cairo.zig");
 const widgets = @import("./widgets.zig");
 const Widget = widgets.Widget;
-const Rect = widgets.Rect;
-const Point = widgets.Point;
+const common = @import("./common.zig");
+const Rect = common.Rect;
+const Point = common.Point;
 const WidgetFromId = std.AutoHashMap(u32, *Widget);
 const c = @cImport({
     @cInclude("linux/input-event-codes.h");
@@ -259,7 +260,7 @@ pub fn endFrame(self: *Self) void {
     // _ = self.buffers[1].cairo_surf.writeToPng("debug2.png");
     if (self.widget) |widget| {
         // log.debug("Attempting to draw widgets", .{});
-        widget.vtable.draw(widget, self, widgets.Rect{ .w = @floatFromInt(self.width), .h = @floatFromInt(self.height) }) catch {};
+        widget.vtable.draw(widget, self, Rect{ .w = @floatFromInt(self.width), .h = @floatFromInt(self.height) }) catch {};
         self.handleInputs();
         self.widget = null;
     }
@@ -281,7 +282,7 @@ fn addChildToCurrentWidget(self: *Self, widget: *Widget) !void {
         widget.parent = widget;
     }
 }
-pub fn getWidget(self: *Self, id_gen: widgets.IdGenerator, T: type) !*Widget {
+pub fn getWidget(self: *Self, id_gen: common.IdGenerator, T: type) !*Widget {
     const id = id_gen.toId();
     const get_or_put_res = try self.widget_storage.getOrPut(id);
     const widget = if (get_or_put_res.found_existing) get_or_put_res.value_ptr.* else blk: {
@@ -294,57 +295,6 @@ pub fn getWidget(self: *Self, id_gen: widgets.IdGenerator, T: type) !*Widget {
         break :blk wid;
     };
     return widget;
-}
-
-pub fn getBox(self: *Self, direction: widgets.Direction, id_gen: widgets.IdGenerator) !*Widget {
-    const widget = try self.getWidget(id_gen, widgets.Box);
-    widget.getInner(widgets.Box).configure(direction);
-
-    // const widget = try widgets.Box.widget(self.allocator, direction);
-    try self.addChildToCurrentWidget(widget);
-    self.widget = widget;
-    return widget;
-}
-pub fn box(self: *Self, direction: widgets.Direction, id_gen: widgets.IdGenerator) !*Widget {
-    const widget = try self.getBox(direction, id_gen);
-    self.widget = widget;
-    return widget;
-}
-
-pub fn getOverlay(self: *Self, id_gen: widgets.IdGenerator) !*Widget {
-    const widget = try self.getWidget(id_gen, widgets.Overlay);
-    widget.getInner(widgets.Overlay).configure();
-    try self.addChildToCurrentWidget(widget);
-    return widget;
-}
-pub fn overlay(self: *Self, id_gen: widgets.IdGenerator) !*Widget {
-    const widget = try self.getOverlay(id_gen);
-    self.widget = widget;
-    return widget;
-}
-
-pub fn getImage(self: *Self, path: [:0]const u8, id_gen: widgets.IdGenerator) !*Widget {
-    const surface = cairo.Surface.createFromPng(path);
-    if (surface.status() != .SUCCESS) {
-        log.warn("{}", .{surface.status()});
-    }
-    const widget = try self.getWidget(id_gen, widgets.Image);
-    widget.getInner(widgets.Image).configure(surface);
-    try self.addChildToCurrentWidget(widget);
-    return widget;
-}
-pub fn image(self: *Self, path: [:0]const u8, id_gen: widgets.IdGenerator) !void {
-    _ = try self.getImage(path, id_gen);
-}
-
-pub fn getText(self: *Self, txt: [:0]const u8, id_gen: widgets.IdGenerator) !*Widget {
-    const widget = try self.getWidget(id_gen, widgets.Text);
-    try self.addChildToCurrentWidget(widget);
-    widget.getInner(widgets.Text).configure(txt);
-    return widget;
-}
-pub fn text(self: *Self, txt: [:0]const u8, id_gen: widgets.IdGenerator) !void {
-    _ = try self.getText(txt, id_gen);
 }
 
 pub fn surfaceListener(_: *wl.Surface, event: wl.Surface.Event, surface: *Self) void {

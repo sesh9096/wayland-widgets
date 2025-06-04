@@ -14,6 +14,7 @@ const Scheduler = @import("./Scheduler.zig");
 const Task = Scheduler.Task;
 const Surface = @import("./Surface.zig");
 pub const Context = @import("./Context.zig");
+pub const BasicWidgets = @import("./BasicWidgets.zig");
 pub const Seat = Context.Seat;
 pub const Windows = std.ArrayList(Window);
 const c = @cImport({
@@ -126,32 +127,33 @@ const FrameData = struct {
         log.debug("{s}: drawing frame {}", .{ time_string[0 .. time_string_len - 1], self.counter });
         self.counter += 1;
         const s = self.surface;
+        const bw = BasicWidgets{ .surface = s };
         {
             s.beginFrame();
             defer s.endFrame();
-            const overlay = try s.overlay(.{ .src = @src() });
-            defer s.end(overlay);
-            try s.image("/home/ss/pictures/draw/experiment.png", .{ .src = @src() });
-            const box = try s.box(.left, .{ .src = @src() });
-            defer s.end(box);
-            const innerbox = try s.box(.left, .{ .src = @src() });
-            s.end(innerbox);
-            const innerbox1 = try s.box(.left, .{ .src = @src() });
-            s.end(innerbox1);
-            const innerbox2 = try s.box(.down, .{ .src = @src() });
-            defer s.end(innerbox2);
-            const innerbox3 = try s.box(.down, .{ .src = @src() });
-            s.end(innerbox3);
-            const innerbox4 = try s.box(.left, .{ .src = @src() });
-            s.end(innerbox4);
+            const overlay = try bw.overlay(.{ .src = @src() });
+            defer bw.end(overlay);
+            try bw.image("/home/ss/pictures/draw/experiment.png", .{ .src = @src() });
+            const box = try bw.box(.left, .{ .src = @src() });
+            defer bw.end(box);
+            const innerbox = try bw.box(.left, .{ .src = @src() });
+            bw.end(innerbox);
+            const innerbox1 = try bw.box(.left, .{ .src = @src() });
+            bw.end(innerbox1);
+            const innerbox2 = try bw.box(.down, .{ .src = @src() });
+            defer bw.end(innerbox2);
+            const innerbox3 = try bw.box(.down, .{ .src = @src() });
+            bw.end(innerbox3);
+            const innerbox4 = try bw.box(.left, .{ .src = @src() });
+            bw.end(innerbox4);
             const timestring = std.fmt.bufPrintZ(self.buf, "{s}", .{time_string[0 .. time_string_len - 1]}) catch unreachable;
-            try s.text(timestring, .{ .src = @src() });
+            try bw.text(timestring, .{ .src = @src() });
             if (self.seat.wl_pointer) |_| {
                 var buf: [64]u8 = undefined;
                 const coords = std.fmt.bufPrintZ(&buf, "({[x]d},{[y]d})", s.input.pointer.pos) catch unreachable;
-                try s.text(coords, .{ .src = @src() });
+                try bw.text(coords, .{ .src = @src() });
             } else {
-                try s.text("Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.", .{ .src = @src() });
+                try bw.text("Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.", .{ .src = @src() });
             }
         }
     }

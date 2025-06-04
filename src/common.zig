@@ -1,0 +1,99 @@
+//! common type definitions
+const std = @import("std");
+const log = std.log;
+const math = std.math;
+const assert = std.debug.assert;
+const SourceLocation = std.builtin.SourceLocation;
+const cairo = @import("./cairo.zig");
+const pango = @import("./pango.zig");
+const Surface = @import("./Surface.zig");
+pub const Point = struct {
+    x: f32 = 0,
+    y: f32 = 0,
+    pub fn in(self: *const Point, rect: Rect) bool {
+        return (self.x >= rect.x and self.y >= rect.y) and (self.x <= (rect.x + rect.w) and self.y <= (rect.y + rect.h));
+    }
+};
+pub const Rect = struct {
+    x: f32 = 0,
+    y: f32 = 0,
+    w: f32 = 0,
+    h: f32 = 0,
+    pub const inf = Rect{
+        .x = -math.inf(f32),
+        .y = -math.inf(f32),
+        .w = math.inf(f32),
+        .h = math.inf(f32),
+    };
+    pub fn area(self: *const Rect) f32 {
+        return self.w * self.h;
+    }
+    pub fn isEmpty(self: *const Rect) bool {
+        return self.w <= 0 or self.h <= 0;
+    }
+    pub fn overlap(a: Rect, b: Rect) Rect {
+        // copied from dvui
+        const ax2 = a.x + a.w;
+        const ay2 = a.y + a.h;
+        const bx2 = b.x + b.w;
+        const by2 = b.y + b.h;
+        const x = @max(a.x, b.x);
+        const y = @max(a.y, b.y);
+        const x2 = @min(ax2, bx2);
+        const y2 = @min(ay2, by2);
+        return Rect{ .x = x, .y = y, .w = @max(0, x2 - x), .h = @max(0, y2 - y) };
+    }
+
+    pub fn subtractSpacing(self: Rect, w: f32, h: f32) Rect {
+        return Rect{
+            self.x + w,
+            self.y + h,
+            self.w - w * 2,
+            self.h - h * 2,
+        };
+    }
+};
+
+/// Config for generating Id's, use `.id` for direct control or `.src` and optionally `.extra`
+pub const IdGenerator = struct {
+    src: ?SourceLocation = null,
+    extra: ?u32 = null,
+    id: ?u32 = null,
+    const hash_u32 = std.hash.uint32;
+    fn idFromSourceLocation(location: SourceLocation) u32 {
+        return hash_u32(location.line) ^ hash_u32(location.column);
+    }
+    pub fn toId(self: @This()) u32 {
+        if (self.id) |id| {
+            return id;
+        } else {
+            const component_location = if (self.src) |loc| idFromSourceLocation(loc) else 0;
+            const component_extra = if (self.extra) |extra| hash_u32(extra) else 0;
+            const id = component_location ^ component_extra;
+            // assert(id != 0);
+            return id;
+        }
+    }
+};
+
+test "different sources" {
+    const id1 = IdGenerator.toId(.{ .src = @src() });
+    const id2 = IdGenerator.toId(.{ .src = @src() });
+    if (id1 == id2) return error.DuplicateId;
+}
+
+test "different extra" {
+    const src = @src();
+    const id1 = IdGenerator.toId(.{ .src = src });
+    const id2 = IdGenerator.toId(.{ .src = src });
+    if (id1 != id2) return error.DifferentId;
+    const id3 = IdGenerator.toId(.{ .src = src, .extra = 0 });
+    const id4 = IdGenerator.toId(.{ .src = src, .extra = 1 });
+    if (id3 == id4) return error.DuplicateId;
+}
+
+test "identical id" {
+    const id1 = IdGenerator.toId(.{ .id = 3 });
+    const id2 = IdGenerator.toId(.{ .id = 3 });
+    if (id1 != id2) return error.DifferentId;
+}

@@ -6,6 +6,10 @@ const SourceLocation = std.builtin.SourceLocation;
 const cairo = @import("./cairo.zig");
 const pango = @import("./pango.zig");
 const Surface = @import("./Surface.zig");
+const common = @import("./common.zig");
+const Rect = common.Rect;
+const Point = common.Point;
+const IdGenerator = common.IdGenerator;
 const Input = Surface.Input;
 pub const Widget = struct {
     // pub const Inner = union(enum) {
@@ -24,8 +28,9 @@ pub const Widget = struct {
         draw: *const fn (self: *Widget, surface: *Surface, bounding_box: Rect) anyerror!void = drawBounding,
         /// handle input, call the corresponding function on parent if not handled
         handleInput: *const fn (self: *Widget, input: *Input) anyerror!void = handleInputDefault,
-        /// Propose a size to the parent, can check children first if desired
-        proposeSize: *const fn (self: *Widget) Point = proposeSizeNull,
+        /// Propose a size to the parent by setting w/h of `widget.rect`.
+        /// Can check children first if desired
+        proposeSize: *const fn (self: *Widget) void = proposeSizeNull,
     };
     // inner: Inner,
     inner: *anyopaque,
@@ -70,9 +75,10 @@ pub const Widget = struct {
         return if (widget != widget.parent) widget.parent.vtable.handleInput(widget.parent, input);
     }
 
-    /// send input to parent
-    pub fn proposeSizeNull(_: *Widget) Point {
-        return Point{};
+    /// propose a size of nothing by default
+    pub fn proposeSizeNull(self: *Widget) void {
+        self.rect.w = 0;
+        self.rect.h = 0;
     }
 };
 const WidgetList = std.ArrayList(*Widget);
@@ -90,11 +96,8 @@ pub fn allocateWidget(allocator: std.mem.Allocator, T: type) !*Widget {
 
 pub const Image = struct {
     surface: *const cairo.Surface,
-    pub fn create(image: *Image) Widget {
-        return Widget{
-            .inner = .image{image},
-            .draw = Image.draw,
-        };
+    pub fn configure(self: *@This(), surface: *const cairo.Surface) void {
+        self.* = Image{ .surface = surface };
     }
     pub fn draw(self: *Widget, surface: *Surface, bounding_box: Rect) !void {
         const cr = surface.currentBuffer().cairo_context;
@@ -105,14 +108,13 @@ pub const Image = struct {
     pub const vtable = Widget.Vtable{
         .draw = draw,
     };
-    pub fn configure(self: *@This(), surface: *const cairo.Surface) void {
-        self.* = Image{ .surface = surface };
-    }
 };
 
 pub const Text = struct {
     text: [:0]const u8,
-    // style: ?Style,
+    pub fn configure(self: *@This(), text: [:0]const u8) void {
+        self.text = text;
+    }
     pub fn draw(self: *Widget, surface: *Surface, bounding_box: Rect) !void {
         const cr = surface.currentBuffer().cairo_context;
         const font_description = pango.FontDescription.fromString("monospace");
@@ -133,15 +135,17 @@ pub const Text = struct {
     pub const vtable = Widget.Vtable{
         .draw = draw,
     };
-    pub fn configure(self: *@This(), text: [:0]const u8) void {
-        self.text = text;
-    }
 };
+
+/// draw multiple widgets on top of each other
 pub const Overlay = struct {
-    // Surface on top of another surface
     children: WidgetList,
-    // top_rect: Rect = .{},
-    // movable: bool = false,
+    pub fn init(self: *Overlay, allocator: std.mem.Allocator) void {
+        self.children = WidgetList.init(allocator);
+    }
+    pub fn configure(self: *Overlay) void {
+        self.children.items.len = 0;
+    }
     fn draw(self: *Widget, surface: *Surface, bounding_box: Rect) !void {
         const overlay = self.getInner(Overlay);
         for (overlay.children.items) |child| {
@@ -150,16 +154,9 @@ pub const Overlay = struct {
         // try top.vtable.draw(top, surface, self.inner.overlay.top_rect);
     }
     pub fn addChild(self: *Widget, child: *Widget) !void {
-        // log.debug("adding child", .{});
+        // TODO: create an special child type to allow for placing items at specific locations
         const overlay = self.getInner(Overlay);
         try overlay.children.append(child);
-        // try overlay.inner.box.children.append(child);
-    }
-    pub fn configure(self: *Overlay) void {
-        self.children.items.len = 0;
-    }
-    pub fn init(self: *Overlay, allocator: std.mem.Allocator) void {
-        self.children = WidgetList.init(allocator);
     }
     pub const vtable = Widget.Vtable{
         .draw = draw,
@@ -175,6 +172,13 @@ pub const Direction = enum {
 pub const Box = struct {
     direction: Direction = .right,
     children: WidgetList,
+    pub fn init(self: *Box, allocator: std.mem.Allocator) void {
+        self.children = WidgetList.init(allocator);
+    }
+    pub fn configure(self: *Box, direction: Direction) void {
+        self.children.items.len = 0;
+        self.direction = direction;
+    }
     fn draw(self: *Widget, surface: *Surface, bounding_box: Rect) !void {
         // draw itself
         const border_width = 2;
@@ -238,18 +242,14 @@ pub const Box = struct {
         .draw = draw,
         .addChild = addChild,
     };
-    pub fn init(self: *Box, allocator: std.mem.Allocator) void {
-        self.children = WidgetList.init(allocator);
-    }
-    pub fn configure(self: *Box, direction: Direction) void {
-        self.children.items.len = 0;
-        self.direction = direction;
-    }
 };
-// pub const Style = struct {};
+
 pub const Button = struct {
     child: ?*Widget,
     clicked: bool = false,
+    pub fn configure(self: *Button) void {
+        self.child = null;
+    }
     fn draw(self: *Widget, surface: *Surface, bounding_box: Rect) !void {
         // draw itself
         const border_width = 2;
@@ -293,98 +293,4 @@ pub const Button = struct {
         .draw = draw,
         .addChild = addChild,
     };
-    pub fn configure(self: *Button) void {
-        self.child = null;
-    }
 };
-
-pub const Point = struct {
-    x: f32 = 0,
-    y: f32 = 0,
-    pub fn in(self: *const Point, rect: Rect) bool {
-        return (self.x >= rect.x and self.y >= rect.y) and (self.x <= (rect.x + rect.w) and self.y <= (rect.y + rect.h));
-    }
-};
-pub const Rect = struct {
-    x: f32 = 0,
-    y: f32 = 0,
-    w: f32 = 0,
-    h: f32 = 0,
-    pub const inf = Rect{
-        .x = -math.inf(f32),
-        .y = -math.inf(f32),
-        .w = math.inf(f32),
-        .h = math.inf(f32),
-    };
-    pub fn area(self: *const Rect) f32 {
-        return self.w * self.h;
-    }
-    pub fn isEmpty(self: *const Rect) bool {
-        return self.w <= 0 or self.h <= 0;
-    }
-    pub fn overlap(a: Rect, b: Rect) Rect {
-        // copied from dvui
-        const ax2 = a.x + a.w;
-        const ay2 = a.y + a.h;
-        const bx2 = b.x + b.w;
-        const by2 = b.y + b.h;
-        const x = @max(a.x, b.x);
-        const y = @max(a.y, b.y);
-        const x2 = @min(ax2, bx2);
-        const y2 = @min(ay2, by2);
-        return Rect{ .x = x, .y = y, .w = @max(0, x2 - x), .h = @max(0, y2 - y) };
-    }
-
-    pub fn subtractSpacing(self: Rect, w: f32, h: f32) Rect {
-        return Rect{
-            self.x + w,
-            self.y + h,
-            self.w - w * 2,
-            self.h - h * 2,
-        };
-    }
-};
-
-/// Config for generating Id's, use `.id` for direct control or `.src` and optionally `.extra`
-pub const IdGenerator = struct {
-    src: ?SourceLocation = null,
-    extra: ?u32 = null,
-    id: ?u32 = null,
-    const hash_u32 = std.hash.uint32;
-    fn idFromSourceLocation(location: SourceLocation) u32 {
-        return hash_u32(location.line) ^ hash_u32(location.column);
-    }
-    pub fn toId(self: @This()) u32 {
-        if (self.id) |id| {
-            return id;
-        } else {
-            const component_location = if (self.src) |loc| idFromSourceLocation(loc) else 0;
-            const component_extra = if (self.extra) |extra| hash_u32(extra) else 0;
-            const id = component_location ^ component_extra;
-            // assert(id != 0);
-            return id;
-        }
-    }
-};
-
-test "different sources" {
-    const id1 = IdGenerator.toId(.{ .src = @src() });
-    const id2 = IdGenerator.toId(.{ .src = @src() });
-    if (id1 == id2) return error.DuplicateId;
-}
-
-test "different extra" {
-    const src = @src();
-    const id1 = IdGenerator.toId(.{ .src = src });
-    const id2 = IdGenerator.toId(.{ .src = src });
-    if (id1 != id2) return error.DifferentId;
-    const id3 = IdGenerator.toId(.{ .src = src, .extra = 0 });
-    const id4 = IdGenerator.toId(.{ .src = src, .extra = 1 });
-    if (id3 == id4) return error.DuplicateId;
-}
-
-test "identical id" {
-    const id1 = IdGenerator.toId(.{ .id = 3 });
-    const id2 = IdGenerator.toId(.{ .id = 3 });
-    if (id1 != id2) return error.DifferentId;
-}
