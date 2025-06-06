@@ -7,7 +7,6 @@ const Surface = @import("./Surface.zig");
 const common = @import("./common.zig");
 const Rect = common.Rect;
 const Point = common.Point;
-const Input = Surface.Input;
 pub const Widget = struct {
     pub const Vtable = struct {
         /// add a child to the widget
@@ -330,6 +329,7 @@ pub const Button = struct {
         if (surface.getPointer()) |pointer| {
             // pointer events possible
             if (!pointer.handled and pointer.in(widget.rect)) {
+                pointer.setShape(.pointer);
                 if (pointer.button == .left and pointer.state == .released) {
                     button.clicked = true;
                 } else {

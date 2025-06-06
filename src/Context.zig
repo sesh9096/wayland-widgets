@@ -179,9 +179,6 @@ pub const Seat = struct {
         state: KeyState = .up,
         serial: u32 = 0,
         cursor_shape_device: ?*wp.CursorShapeDeviceV1 = null,
-        pub fn in(self: *Pointer, rect: Rect) bool {
-            return self.pos.in(rect);
-        }
         pub const Button = enum {
             left,
             right,
@@ -192,6 +189,12 @@ pub const Seat = struct {
             back,
             task,
         };
+        pub fn in(self: *Pointer, rect: Rect) bool {
+            return self.pos.in(rect);
+        }
+        pub fn setShape(self: *Pointer, shape: wp.CursorShapeDeviceV1.Shape) void {
+            self.cursor_shape_device.?.setShape(self.serial, shape);
+        }
         pub fn listener(wl_pointer: *wl.Pointer, event: wl.Pointer.Event, seat: *Seat) void {
             // main input logic handled by Surface
             assert(wl_pointer == seat.wl_pointer);
@@ -204,7 +207,6 @@ pub const Seat = struct {
                         .y = @floatCast(data.surface_y.toDouble()),
                     };
                     pointer.serial = data.serial;
-                    pointer.cursor_shape_device.?.setShape(data.serial, .default);
                     pointer.surface = seat.getSurface(data.surface.?) catch unreachable;
                     pointer.surface.?.notify(event);
                 },

@@ -148,6 +148,8 @@ pub fn handleInputs(self: *Self) void {
                 } else {
                     widget_opt = widget.parent;
                 }
+            } else {
+                pointer.setShape(.default);
             }
             if (self.pointer_widget) |prev| {
                 // we have already handled in this case
