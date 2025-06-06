@@ -4,7 +4,6 @@ const assert = std.debug.assert;
 const wayland = @import("wayland");
 const wlr = wayland.client.zwlr;
 
-const widgets = @import("./widgets.zig");
 const Surface = @import("./Surface.zig");
 const Context = @import("./main.zig").Context;
 const Self = @This();

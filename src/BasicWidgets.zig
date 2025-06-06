@@ -3,15 +3,20 @@
 const std = @import("std");
 const log = std.log;
 const assert = std.debug.assert;
-const main = @import("./main.zig");
 const cairo = @import("./cairo.zig");
-const widgets = @import("./widgets.zig");
+const pango = @import("./pango.zig");
+const Widget = @import("./Widget.zig");
+const WidgetList = std.ArrayList(*Widget);
 const Surface = @import("./Surface.zig");
-const Widget = widgets.Widget;
 const common = @import("./common.zig");
 const Rect = common.Rect;
 const Point = common.Point;
+const Direction = common.Direction;
 const IdGenerator = common.IdGenerator;
+
+const Text = @import("./BasicWidgets/Text.zig");
+const Button = @import("./BasicWidgets/Button.zig");
+const Box = @import("./BasicWidgets/Box.zig");
 
 surface: *Surface,
 
@@ -56,22 +61,22 @@ pub fn end(self: *const Self, widget: *Widget) void {
     }
 }
 
-pub fn getBox(self: *const Self, direction: widgets.Direction, id_gen: IdGenerator) !*Widget {
-    const widget = try self.getWidget(id_gen, widgets.Box);
-    widget.getInner(widgets.Box).configure(direction);
+pub fn getBox(self: *const Self, direction: Direction, id_gen: IdGenerator) !*Widget {
+    const widget = try self.getWidget(id_gen, Box);
+    widget.getInner(Box).configure(direction);
 
-    // const widget = try widgets.Box.widget(self.allocator, direction);
+    // const widget = try Box.widget(self.allocator, direction);
     return widget;
 }
-pub fn box(self: *const Self, direction: widgets.Direction, id_gen: IdGenerator) !*Widget {
+pub fn box(self: *const Self, direction: Direction, id_gen: IdGenerator) !*Widget {
     const widget = try self.getBox(direction, id_gen);
     try self.addWidgetSetCurrent(widget);
     return widget;
 }
 
 pub fn getOverlay(self: *const Self, id_gen: IdGenerator) !*Widget {
-    const widget = try self.getWidget(id_gen, widgets.Overlay);
-    widget.getInner(widgets.Overlay).configure();
+    const widget = try self.getWidget(id_gen, Overlay);
+    widget.getInner(Overlay).configure();
     return widget;
 }
 pub fn overlay(self: *const Self, id_gen: IdGenerator) !*Widget {
@@ -86,8 +91,8 @@ pub fn getImage(self: *const Self, path: [:0]const u8, id_gen: IdGenerator) !*Wi
         log.err("{}", .{image_surface.status()});
     }
 
-    const widget = try self.getWidget(id_gen, widgets.Image);
-    widget.getInner(widgets.Image).configure(image_surface);
+    const widget = try self.getWidget(id_gen, Image);
+    widget.getInner(Image).configure(image_surface);
     return widget;
 }
 pub fn image(self: *const Self, path: [:0]const u8, id_gen: IdGenerator) !void {
@@ -96,8 +101,8 @@ pub fn image(self: *const Self, path: [:0]const u8, id_gen: IdGenerator) !void {
 }
 
 pub fn getText(self: *const Self, txt: [:0]const u8, id_gen: IdGenerator) !*Widget {
-    const widget = try self.getWidget(id_gen, widgets.Text);
-    widget.getInner(widgets.Text).configure(txt);
+    const widget = try self.getWidget(id_gen, Text);
+    widget.getInner(Text).configure(txt);
     return widget;
 }
 pub fn text(self: *const Self, txt: [:0]const u8, id_gen: IdGenerator) !void {
@@ -106,16 +111,64 @@ pub fn text(self: *const Self, txt: [:0]const u8, id_gen: IdGenerator) !void {
 }
 
 pub fn getButton(self: *const Self, id_gen: IdGenerator) !*Widget {
-    const widget = try self.getWidget(id_gen, widgets.Button);
-    widget.getInner(widgets.Button).configure();
+    const widget = try self.getWidget(id_gen, Button);
+    widget.getInner(Button).configure();
     return widget;
 }
 
-pub fn button(self: *const Self, txt: [:0]const u8, id_gen: IdGenerator) !*widgets.Button {
+pub fn button(self: *const Self, txt: [:0]const u8, id_gen: IdGenerator) !*Button {
     const widget = try self.getButton(id_gen);
     const text_widget = try self.getText(txt, id_gen.addExtra(0));
     try widget.vtable.addChild(widget, text_widget);
     text_widget.parent = widget;
     try self.addWidget(widget);
-    return widget.getInner(widgets.Button);
+    return widget.getInner(Button);
 }
+
+pub const Image = struct {
+    surface: *const cairo.Surface,
+    pub fn configure(self: *@This(), surface: *const cairo.Surface) void {
+        self.* = Image{ .surface = surface };
+    }
+    pub fn draw(self: *Widget, surface: *Surface) !void {
+        const bounding_box = self.rect;
+        const cr = surface.currentBuffer().cairo_context;
+        cr.setSourceSurface(self.getInner(@This()).surface, bounding_box.x, bounding_box.y);
+        // log.debug("Drawing image at {} {}", .{ bounding_box.x, bounding_box.y });
+        cr.paint();
+    }
+    pub const vtable = Widget.Vtable{
+        .draw = draw,
+    };
+};
+
+/// draw multiple widgets on top of each other
+pub const Overlay = struct {
+    children: WidgetList,
+    pub fn init(self: *Overlay, allocator: std.mem.Allocator) void {
+        self.children = WidgetList.init(allocator);
+    }
+    pub fn configure(self: *Overlay) void {
+        self.children.items.len = 0;
+    }
+    fn draw(self: *Widget, surface: *Surface) !void {
+        for (self.getInner(@This()).children.items) |child| {
+            child.rect = self.rect;
+            try child.vtable.draw(child, surface);
+        }
+        // try top.vtable.draw(top, surface, self.inner.overlay.top_rect);
+    }
+    pub fn addChild(self: *Widget, child: *Widget) !void {
+        // TODO: create an special child type to allow for placing items at specific locations
+        try self.getInner(@This()).children.append(child);
+    }
+    pub fn getChildren(self: *Widget) []*Widget {
+        // TODO: create an special child type to allow for placing items at specific locations
+        return self.getInner(@This()).children.items;
+    }
+    pub const vtable = Widget.Vtable{
+        .draw = draw,
+        .addChild = addChild,
+        .getChildren = getChildren,
+    };
+};

@@ -12,9 +12,8 @@ const wl = wayland.client.wl;
 const xdg = wayland.client.xdg;
 const wlr = wayland.client.zwlr;
 const cairo = @import("./cairo.zig");
-const widgets = @import("./widgets.zig");
-const Widget = widgets.Widget;
 const common = @import("./common.zig");
+const Widget = common.Widget;
 const Rect = common.Rect;
 const Point = common.Point;
 const WidgetFromId = std.AutoHashMap(u32, *Widget);
@@ -211,7 +210,7 @@ pub fn getWidget(self: *Self, id_gen: common.IdGenerator, T: type) !*Widget {
     const get_or_put_res = try self.widget_storage.getOrPut(id);
     const widget = if (get_or_put_res.found_existing) get_or_put_res.value_ptr.* else blk: {
         // log.debug("Created {s} widget with id {}", .{ @typeName(T), id });
-        const wid = try widgets.allocateWidget(self.allocator, T);
+        const wid = try Widget.allocateWidget(self.allocator, T);
         get_or_put_res.value_ptr.* = wid;
         const inner: *T = @ptrCast(@alignCast(wid.inner));
         if (@hasDecl(T, "init")) inner.init(self.allocator);

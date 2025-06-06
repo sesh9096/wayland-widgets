@@ -4,9 +4,10 @@ const log = std.log;
 const math = std.math;
 const assert = std.debug.assert;
 const SourceLocation = std.builtin.SourceLocation;
-const cairo = @import("./cairo.zig");
-const pango = @import("./pango.zig");
-const Surface = @import("./Surface.zig");
+pub const cairo = @import("./cairo.zig");
+pub const pango = @import("./pango.zig");
+pub const Surface = @import("./Surface.zig");
+pub const Widget = @import("./Widget.zig");
 pub const Point = struct {
     x: f32 = 0,
     y: f32 = 0,
@@ -126,4 +127,11 @@ pub const KeyState = enum {
             .pressed, .down => if (event == .released) .released else .down,
         };
     }
+};
+
+pub const Direction = enum {
+    left,
+    right,
+    up,
+    down,
 };

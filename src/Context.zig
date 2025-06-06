@@ -10,7 +10,6 @@ const xdg = wayland.client.xdg;
 const wlr = wayland.client.zwlr;
 const wp = wayland.client.wp;
 const cairo = @import("./cairo.zig");
-const widgets = @import("./widgets.zig");
 const Scheduler = @import("./Scheduler.zig");
 const Surface = @import("./Surface.zig");
 const LayerSurfaceWindow = @import("./LayerSurfaceWindow.zig");

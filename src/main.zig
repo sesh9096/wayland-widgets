@@ -8,7 +8,6 @@ const wl = wayland.client.wl;
 const xdg = wayland.client.xdg;
 const wlr = wayland.client.zwlr;
 const cairo = @import("./cairo.zig");
-const widgets = @import("./widgets.zig");
 const Window = @import("./LayerSurfaceWindow.zig");
 const Scheduler = @import("./Scheduler.zig");
 const Task = Scheduler.Task;
