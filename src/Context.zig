@@ -8,12 +8,19 @@ const wayland = @import("wayland");
 const wl = wayland.client.wl;
 const xdg = wayland.client.xdg;
 const wlr = wayland.client.zwlr;
+const wp = wayland.client.wp;
 const cairo = @import("./cairo.zig");
 const widgets = @import("./widgets.zig");
-const Window = @import("./LayerSurfaceWindow.zig");
 const Scheduler = @import("./Scheduler.zig");
-const Task = Scheduler.Task;
 const Surface = @import("./Surface.zig");
+const LayerSurfaceWindow = @import("./LayerSurfaceWindow.zig");
+const common = @import("./common.zig");
+const Rect = common.Rect;
+const Point = common.Point;
+const KeyState = common.KeyState;
+const c = @cImport({
+    @cInclude("linux/input-event-codes.h");
+});
 
 display: *wl.Display,
 scheduler: Scheduler,
@@ -62,19 +69,6 @@ pub fn displayFd(self: *const @This()) c_int {
     return self.display.getFd();
 }
 
-fn layerSurfaceListener(layer_surface: *wlr.LayerSurfaceV1, event: wlr.LayerSurfaceV1.Event, window: *const Window) void {
-    switch (event) {
-        .configure => |content| {
-            // log.debug("Acking layer surface configure", .{});
-            layer_surface.ackConfigure(content.serial);
-            assert(window.width == 0 or window.width == content.width);
-            assert(window.height == 0 or window.height == content.height);
-            // wl_surface.commit();
-        },
-        else => {},
-    }
-}
-
 fn registryListener(registry: *wl.Registry, event: wl.Registry.Event, context: *Context) void {
     switch (event) {
         .global => |global| {
@@ -91,6 +85,8 @@ fn registryListener(registry: *wl.Registry, event: wl.Registry.Event, context: *
                 context.wm_base = registry.bind(global.name, xdg.WmBase, 1) catch return;
             } else if (std.mem.orderZ(u8, global.interface, xdg.WmBase.interface.name) == .eq) {
                 context.wm_base = registry.bind(global.name, xdg.WmBase, 1) catch return;
+            } else if (std.mem.orderZ(u8, global.interface, wp.CursorShapeManagerV1.interface.name) == .eq) {
+                context.seat.cursor_shape_manager = registry.bind(global.name, wp.CursorShapeManagerV1, 1) catch return;
             } else if (std.mem.orderZ(u8, global.interface, wl.Output.interface.name) == .eq) {
                 const wl_output = registry.bind(global.name, wl.Output, 1) catch return;
                 context.outputs.append(Output{
@@ -114,13 +110,13 @@ const Output = struct {
     fn deinit(self: *@This()) void {
         self.wl_output.deinit();
     }
-    pub fn initLayerSurface(self: @This(), context: *Context, window: *const Window) !Surface {
+    pub fn initLayerSurface(self: @This(), context: *Context, window: *const LayerSurfaceWindow) !Surface {
         const display = context.display;
         const compositor = context.compositor;
         const layer_shell = context.layer_shell orelse return error.NoZwlrLayerShell;
         const wl_surface = try compositor.createSurface();
         const layer_surface = try layer_shell.getLayerSurface(wl_surface, self.wl_output, window.layer, window.namespace);
-        layer_surface.setListener(*const Window, layerSurfaceListener, window);
+        layer_surface.setListener(*const LayerSurfaceWindow, LayerSurfaceWindow.listener, window);
         const width = if (window.width == 0) self.width else @as(i32, @intCast(window.width));
         const height = if (window.height == 0) self.height else @as(i32, @intCast(window.height));
         layer_surface.setSize(@intCast(width), @intCast(height));
@@ -167,10 +163,105 @@ pub const Seat = struct {
     surfaces: Surfaces = undefined,
     wl_pointer: ?*wl.Pointer = null,
     pointer_surface: ?*Surface = null,
+    cursor_shape_manager: ?*wp.CursorShapeManagerV1 = null,
     wl_keyboard: ?*wl.Keyboard = null,
     wl_touch: ?*wl.Touch = null,
     name: [*:0]const u8 = "",
+    pointer: Pointer = .{},
+    // keyboard: void,
+    // touch: void,
     const Surfaces = std.ArrayList(*Surface);
+    pub const Pointer = struct {
+        pos: Point = .{},
+        button: ?Button = null,
+        surface: ?*Surface = null,
+        handled: bool = false,
+        state: KeyState = .up,
+        serial: u32 = 0,
+        cursor_shape_device: ?*wp.CursorShapeDeviceV1 = null,
+        pub fn in(self: *Pointer, rect: Rect) bool {
+            return self.pos.in(rect);
+        }
+        pub const Button = enum {
+            left,
+            right,
+            middle,
+            side,
+            extra,
+            forward,
+            back,
+            task,
+        };
+        pub fn listener(wl_pointer: *wl.Pointer, event: wl.Pointer.Event, seat: *Seat) void {
+            // main input logic handled by Surface
+            assert(wl_pointer == seat.wl_pointer);
+            const pointer = &seat.pointer;
+            switch (event) {
+                .enter => |data| {
+                    assert(pointer.surface == null);
+                    pointer.pos = .{
+                        .x = @floatCast(data.surface_x.toDouble()),
+                        .y = @floatCast(data.surface_y.toDouble()),
+                    };
+                    pointer.serial = data.serial;
+                    pointer.cursor_shape_device.?.setShape(data.serial, .default);
+                    pointer.surface = seat.getSurface(data.surface.?) catch unreachable;
+                    pointer.surface.?.notify(event);
+                },
+                .leave => |data| {
+                    assert(data.surface == pointer.surface.?.wl_surface);
+                    pointer.surface.?.notify(event);
+                    pointer.surface = null;
+                },
+                .motion => |data| {
+                    pointer.pos = .{
+                        .x = @floatCast(data.surface_x.toDouble()),
+                        .y = @floatCast(data.surface_y.toDouble()),
+                    };
+                    pointer.surface.?.notify(event);
+                },
+                .button => |data| {
+                    const btn: ?Pointer.Button = switch (data.button) {
+                        c.BTN_LEFT => .left,
+                        c.BTN_RIGHT => .right,
+                        c.BTN_MIDDLE => .middle,
+                        c.BTN_SIDE => .side,
+                        c.BTN_EXTRA => .extra,
+                        c.BTN_FORWARD => .forward,
+                        c.BTN_BACK => .back,
+                        c.BTN_TASK => .task,
+                        else => blk: {
+                            log.warn("Button 0x{x} not supported", .{data.button});
+                            break :blk null;
+                        },
+                    };
+                    switch (data.state) {
+                        .pressed => {
+                            pointer.button = btn;
+                            pointer.state.transition(.pressed);
+                        },
+                        .released => {
+                            if (pointer.button == btn) {
+                                pointer.state.transition(.released);
+                            }
+                        },
+                        _ => unreachable,
+                    }
+                    pointer.surface.?.notify(event);
+                },
+                else => |data| {
+                    seat.pointer.surface.?.notify(event);
+                    log.warn("Unsupported event: {}", .{data});
+                },
+            }
+        }
+    };
+    pub fn transitionState(self: *Seat) void {
+        self.pointer.state.transition(self.pointer.state);
+    }
+    pub fn reset(self: *Seat) void {
+        self.pointer.handled = if (self.pointer.surface) |_| false else true;
+    }
     fn deinit(self: *Seat) void {
         self.wl_seat.deinit();
     }
@@ -196,7 +287,10 @@ pub const Seat = struct {
         if (capabilities.pointer) {
             const wl_pointer = try wl_seat.getPointer();
             self.wl_pointer = wl_pointer;
-            wl_pointer.setListener(*Seat, pointerListener, self);
+            wl_pointer.setListener(*Seat, Pointer.listener, self);
+            if (self.cursor_shape_manager) |cursor_shape_manager| {
+                self.pointer.cursor_shape_device = try cursor_shape_manager.getPointer(wl_pointer);
+            }
         }
         if (capabilities.keyboard) {
             const wl_keyboard = try wl_seat.getKeyboard();
@@ -220,24 +314,6 @@ pub const Seat = struct {
         }
         log.err("Surface {*} not registered with seat", .{wl_surface});
         return error.SurfaceNotRegistered;
-    }
-    pub fn pointerListener(wl_pointer: *wl.Pointer, event: wl.Pointer.Event, seat: *Seat) void {
-        // main input logic handled by Surface
-        assert(wl_pointer == seat.wl_pointer);
-        switch (event) {
-            .enter => |data| {
-                seat.pointer_surface = seat.getSurface(data.surface.?) catch unreachable;
-                seat.pointer_surface.?.notify(event);
-            },
-            .leave => |data| {
-                assert(data.surface == seat.pointer_surface.?.wl_surface);
-                seat.pointer_surface.?.notify(event);
-                seat.pointer_surface = null;
-            },
-            else => {
-                seat.pointer_surface.?.notify(event);
-            },
-        }
     }
     pub fn keyboardListener(_: *wl.Keyboard, event: wl.Keyboard.Event, seat: *Seat) void {
         _ = seat;

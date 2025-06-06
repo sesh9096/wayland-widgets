@@ -148,9 +148,9 @@ const FrameData = struct {
             bw.end(innerbox4);
             const timestring = std.fmt.bufPrintZ(self.buf, "{s}", .{time_string[0 .. time_string_len - 1]}) catch unreachable;
             try bw.text(timestring, .{ .src = @src() });
-            if (self.seat.wl_pointer) |_| {
+            if (s.getPointer()) |pointer| {
                 var buf: [64]u8 = undefined;
-                const coords = std.fmt.bufPrintZ(&buf, "({[x]d},{[y]d})", s.input.pointer.pos) catch unreachable;
+                const coords = std.fmt.bufPrintZ(&buf, "({[x]d},{[y]d})", pointer.pos) catch unreachable;
                 try bw.text(coords, .{ .src = @src() });
             } else {
                 try bw.text("Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.", .{ .src = @src() });

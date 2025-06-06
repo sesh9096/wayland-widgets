@@ -18,9 +18,6 @@ const common = @import("./common.zig");
 const Rect = common.Rect;
 const Point = common.Point;
 const WidgetFromId = std.AutoHashMap(u32, *Widget);
-const c = @cImport({
-    @cInclude("linux/input-event-codes.h");
-});
 
 wl_surface: *wl.Surface,
 shared_memory: []align(std.mem.page_size) u8,
@@ -33,57 +30,7 @@ widget_storage: WidgetFromId,
 allocator: std.mem.Allocator,
 seat: *Seat,
 redraw: bool = false,
-
-// event handling
-input: Input = .{},
-pub const Input = struct {
-    pointer: Pointer = .{},
-    // keyboard: void,
-    // touch: void,
-    const Pointer = struct {
-        pos: Point = .{},
-        button: ?Button = null,
-        focused: bool = false,
-        handled: bool = false,
-        state: KeyState = .up,
-        /// widget which handled the event, needs to be notified if we leave
-        widget: ?*Widget = null,
-        pub fn in(self: *Pointer, rect: Rect) bool {
-            return self.pos.in(rect);
-        }
-    };
-    pub const Button = enum {
-        left,
-        right,
-        middle,
-        side,
-        extra,
-        forward,
-        back,
-        task,
-    };
-    pub fn transitionState(self: *Input) void {
-        self.pointer.state.transition(self.pointer.state);
-    }
-    pub fn reset(self: *Input) void {
-        self.pointer.handled = if (self.pointer.focused) false else true;
-    }
-    pub const KeyState = enum {
-        up,
-        pressed,
-        down,
-        released,
-        pub fn reset(self: *KeyState) void {
-            self = .up;
-        }
-        pub fn transition(self: *KeyState, event: KeyState) void {
-            self.* = switch (self.*) {
-                .up, .released => if (event == .pressed) .pressed else .up,
-                .pressed, .down => if (event == .released) .released else .down,
-            };
-        }
-    };
-};
+pointer_widget: ?*Widget = null,
 
 const Self = @This();
 
@@ -161,60 +108,11 @@ pub fn setListeners(self: *Self) !void {
 pub fn notify(self: *Self, event: anytype) void {
     self.redraw = true;
     const eventType = @TypeOf(event);
-    if (eventType == wl.Pointer.Event) {
-        const pointer = &self.input.pointer;
-        switch (event) {
-            .enter => |data| {
-                assert(data.surface == self.wl_surface);
-                pointer.pos = .{
-                    .x = @floatCast(data.surface_x.toDouble()),
-                    .y = @floatCast(data.surface_y.toDouble()),
-                };
-                pointer.focused = true;
-            },
-            .leave => |data| {
-                assert(data.surface == self.wl_surface);
-                pointer.focused = false;
-            },
-            .motion => |data| {
-                pointer.pos = .{
-                    .x = @floatCast(data.surface_x.toDouble()),
-                    .y = @floatCast(data.surface_y.toDouble()),
-                };
-            },
-            .button => |data| {
-                const btn: ?Input.Button = switch (data.button) {
-                    c.BTN_LEFT => .left,
-                    c.BTN_RIGHT => .right,
-                    c.BTN_MIDDLE => .middle,
-                    c.BTN_SIDE => .side,
-                    c.BTN_EXTRA => .extra,
-                    c.BTN_FORWARD => .forward,
-                    c.BTN_BACK => .back,
-                    c.BTN_TASK => .task,
-                    else => blk: {
-                        log.warn("Button 0x{x} not supported", .{data.button});
-                        break :blk null;
-                    },
-                };
-                switch (data.state) {
-                    .pressed => {
-                        pointer.button = btn;
-                        pointer.state.transition(.pressed);
-                    },
-                    .released => {
-                        if (pointer.button == btn) {
-                            pointer.state.transition(.released);
-                        }
-                    },
-                    _ => unreachable,
-                }
-            },
-            else => |data| {
-                log.warn("Unsupported event: {}", .{data});
-            },
-        }
-    }
+    if (eventType == wl.Pointer.Event) {}
+}
+pub fn getPointer(self: *Self) ?*Seat.Pointer {
+    const pointer = &self.seat.pointer;
+    return if (pointer.surface == self) pointer else null;
 }
 
 pub fn getDeepestWidgetAtPoint(self: *Self, point: Point) ?*Widget {
@@ -239,24 +137,23 @@ pub fn getDeepestWidgetAtPoint(self: *Self, point: Point) ?*Widget {
 
 /// Send inputs to the relevant widgets
 pub fn handleInputs(self: *Self) void {
-    const pointer = &self.input.pointer;
-    self.input.reset();
-    if (pointer.focused) {
+    self.seat.reset();
+    if (self.getPointer()) |pointer| {
         if (self.getDeepestWidgetAtPoint(pointer.pos)) |widget_initial| {
             var widget_opt: ?*Widget = widget_initial;
             while (widget_opt) |widget| {
-                widget.vtable.handleInput(widget, &self.input) catch {};
+                widget.vtable.handleInput(widget, self) catch {};
                 if (pointer.handled) {
                     break;
                 } else {
                     widget_opt = widget.parent;
                 }
             }
-            if (pointer.widget) |prev| {
+            if (self.pointer_widget) |prev| {
                 // we have already handled in this case
-                if (prev != widget_opt) prev.vtable.handleInput(prev, &self.input) catch {};
+                if (prev != widget_opt) prev.vtable.handleInput(prev, self) catch {};
             }
-            pointer.widget = widget_opt;
+            self.pointer_widget = widget_opt;
         }
     }
 }
@@ -290,7 +187,7 @@ pub fn endFrame(self: *Self) void {
     self.wl_surface.damage(0, 0, math.maxInt(@TypeOf(self.width)), math.maxInt(@TypeOf(self.height)));
     self.wl_surface.commit();
     self.redraw = false;
-    self.input.transitionState();
+    self.seat.transitionState();
 }
 
 pub fn end(self: *Self, widget: *Widget) void {

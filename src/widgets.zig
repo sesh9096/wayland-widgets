@@ -19,7 +19,7 @@ pub const Widget = struct {
         /// use widget.rect as the rect for drawing
         draw: *const fn (self: *Widget, surface: *Surface) anyerror!void = drawBounding,
         /// handle input, call the corresponding function on parent if not handled
-        handleInput: *const fn (self: *Widget, input: *Input) anyerror!void = handleInputDefault,
+        handleInput: *const fn (self: *Widget, Surface: *Surface) anyerror!void = handleInputDefault,
         /// Propose a size to the parent by setting w/h of `widget.rect`.
         /// Can check children first if desired
         proposeSize: *const fn (self: *Widget) void = proposeSizeNull,
@@ -64,7 +64,7 @@ pub const Widget = struct {
     }
 
     /// send input to parent
-    pub fn handleInputDefault(_: *Widget, _: *Input) !void {}
+    pub fn handleInputDefault(_: *Widget, _: *Surface) !void {}
 
     /// propose a size of nothing by default
     pub fn proposeSizeNull(self: *Widget) void {
@@ -325,19 +325,20 @@ pub const Button = struct {
             return ret[0..0];
         }
     }
-    pub fn handleInput(widget: *Widget, input: *Input) !void {
-        const pointer = &input.pointer;
+    pub fn handleInput(widget: *Widget, surface: *Surface) !void {
         const button = widget.getInner(@This());
-        // pointer events possible
-        if (!pointer.handled and pointer.in(widget.rect)) {
-            if (pointer.button == .left and pointer.state == .released) {
-                button.clicked = true;
+        if (surface.getPointer()) |pointer| {
+            // pointer events possible
+            if (!pointer.handled and pointer.in(widget.rect)) {
+                if (pointer.button == .left and pointer.state == .released) {
+                    button.clicked = true;
+                } else {
+                    button.clicked = false;
+                }
+                pointer.handled = true;
             } else {
                 button.clicked = false;
             }
-            pointer.handled = true;
-        } else {
-            button.clicked = false;
         }
     }
     pub fn proposeSize(self: *Widget) void {

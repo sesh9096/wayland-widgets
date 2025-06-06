@@ -7,7 +7,13 @@ A system monitor and widgets using wayland protocols
 Dependencies:
 - cairo
 - pango
+
+Build Dependencies:
 - zig-wayland
+- wayland-protocols
+- cairo-devel
+- pango-devel
+
 * Implementation
 To create a surface:
 1. Create Context

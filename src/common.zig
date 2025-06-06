@@ -111,3 +111,19 @@ test "identical id" {
     const id2 = IdGenerator.toId(.{ .id = 3 });
     if (id1 != id2) return error.DifferentId;
 }
+
+pub const KeyState = enum {
+    up,
+    pressed,
+    down,
+    released,
+    pub fn reset(self: *KeyState) void {
+        self = .up;
+    }
+    pub fn transition(self: *KeyState, event: KeyState) void {
+        self.* = switch (self.*) {
+            .up, .released => if (event == .pressed) .pressed else .up,
+            .pressed, .down => if (event == .released) .released else .down,
+        };
+    }
+};

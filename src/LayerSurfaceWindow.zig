@@ -1,4 +1,6 @@
 //! Layer Shell Window
+const std = @import("std");
+const assert = std.debug.assert;
 const wayland = @import("wayland");
 const wlr = wayland.client.zwlr;
 
@@ -28,3 +30,16 @@ pub const Margins = struct {
 };
 
 pub fn deinit() void {}
+
+pub fn listener(layer_surface: *wlr.LayerSurfaceV1, event: wlr.LayerSurfaceV1.Event, window: *const @This()) void {
+    switch (event) {
+        .configure => |content| {
+            // log.debug("Acking layer surface configure", .{});
+            layer_surface.ackConfigure(content.serial);
+            assert(window.width == 0 or window.width == content.width);
+            assert(window.height == 0 or window.height == content.height);
+            // wl_surface.commit();
+        },
+        else => {},
+    }
+}
