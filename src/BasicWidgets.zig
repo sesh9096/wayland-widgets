@@ -2,15 +2,8 @@
 //! methods beginning with `get` should only create a Widget object and not attach it to the tree
 const std = @import("std");
 const log = std.log;
-const math = std.math;
 const assert = std.debug.assert;
 const main = @import("./main.zig");
-const Context = main.Context;
-const Seat = main.Seat;
-const wayland = @import("wayland");
-const wl = wayland.client.wl;
-const xdg = wayland.client.xdg;
-const wlr = wayland.client.zwlr;
 const cairo = @import("./cairo.zig");
 const widgets = @import("./widgets.zig");
 const Surface = @import("./Surface.zig");
@@ -38,7 +31,7 @@ pub fn addWidget(self: *const Self, widget: *Widget) !void {
         widget.parent = parent;
         try parent.vtable.addChild(parent, widget);
     } else {
-        widget.parent = widget;
+        widget.parent = null;
     }
 }
 /// Add widget as a child of the current widget and then make it the current widget.
@@ -58,7 +51,9 @@ pub fn getWidget(self: *const Self, id_gen: common.IdGenerator, T: type) !*Widge
 
 pub fn end(self: *const Self, widget: *Widget) void {
     assert(widget == self.surface.widget);
-    self.surface.widget = widget.parent;
+    if (widget.parent) |parent| {
+        self.surface.widget = parent;
+    }
 }
 
 pub fn getBox(self: *const Self, direction: widgets.Direction, id_gen: IdGenerator) !*Widget {
@@ -116,9 +111,11 @@ pub fn getButton(self: *const Self, id_gen: IdGenerator) !*Widget {
     return widget;
 }
 
-pub fn button(self: *const Self, txt: [:0]const u8, id_gen: IdGenerator) !void {
-    const text_widget = try self.getText(txt, id_gen);
+pub fn button(self: *const Self, txt: [:0]const u8, id_gen: IdGenerator) !*widgets.Button {
     const widget = try self.getButton(id_gen);
+    const text_widget = try self.getText(txt, id_gen.addExtra(0));
     try widget.vtable.addChild(widget, text_widget);
-    try self.addWidgetSetCurrent(widget);
+    text_widget.parent = widget;
+    try self.addWidget(widget);
+    return widget.getInner(widgets.Button);
 }

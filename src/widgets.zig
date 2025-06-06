@@ -1,23 +1,14 @@
 const std = @import("std");
 const log = std.log;
-const math = std.math;
 const assert = std.debug.assert;
-const SourceLocation = std.builtin.SourceLocation;
 const cairo = @import("./cairo.zig");
 const pango = @import("./pango.zig");
 const Surface = @import("./Surface.zig");
 const common = @import("./common.zig");
 const Rect = common.Rect;
 const Point = common.Point;
-const IdGenerator = common.IdGenerator;
 const Input = Surface.Input;
 pub const Widget = struct {
-    // pub const Inner = union(enum) {
-    //     image: *Image,
-    //     text: *Text,
-    //     box: *Box,
-    //     overlay: *Overlay,
-    // };
     pub const Vtable = struct {
         /// add a child to the widget
         addChild: *const fn (self: *Widget, child: *Widget) (std.mem.Allocator.Error || AddChildError)!void = addChildNotAllowed,
@@ -25,18 +16,19 @@ pub const Widget = struct {
         /// children should be in ordered so those on top should be at the end
         getChildren: *const fn (self: *Widget) []*Widget = getChildrenNone,
         /// draw the widget on the surface
-        draw: *const fn (self: *Widget, surface: *Surface, bounding_box: Rect) anyerror!void = drawBounding,
+        /// use widget.rect as the rect for drawing
+        draw: *const fn (self: *Widget, surface: *Surface) anyerror!void = drawBounding,
         /// handle input, call the corresponding function on parent if not handled
         handleInput: *const fn (self: *Widget, input: *Input) anyerror!void = handleInputDefault,
         /// Propose a size to the parent by setting w/h of `widget.rect`.
         /// Can check children first if desired
         proposeSize: *const fn (self: *Widget) void = proposeSizeNull,
     };
-    // inner: Inner,
     inner: *anyopaque,
-    parent: *Widget = undefined,
+    parent: ?*Widget = null,
     rect: Rect = .{},
     vtable: *const Vtable = &.{},
+    /// convenience function which does some coercion
     pub fn getInner(self: *Widget, T: type) *T {
         return @ptrCast(@alignCast(self.inner));
     }
@@ -55,9 +47,10 @@ pub const Widget = struct {
     }
 
     /// for widgets which are base nodes
-    pub fn drawBounding(_: *Widget, surface: *Surface, bounding_box: Rect) !void {
+    pub fn drawBounding(widget: *Widget, surface: *Surface) !void {
         // log.debug("Default drawing", .{});
         const cr = surface.currentBuffer().cairo_context;
+        const bounding_box = widget.rect;
         const thickness = 3;
         cr.setLineWidth(thickness);
         cr.setSourceRgb(1, 0.5, 0.5);
@@ -71,9 +64,7 @@ pub const Widget = struct {
     }
 
     /// send input to parent
-    pub fn handleInputDefault(widget: *Widget, input: *Input) !void {
-        return if (widget != widget.parent) widget.parent.vtable.handleInput(widget.parent, input);
-    }
+    pub fn handleInputDefault(_: *Widget, _: *Input) !void {}
 
     /// propose a size of nothing by default
     pub fn proposeSizeNull(self: *Widget) void {
@@ -99,7 +90,8 @@ pub const Image = struct {
     pub fn configure(self: *@This(), surface: *const cairo.Surface) void {
         self.* = Image{ .surface = surface };
     }
-    pub fn draw(self: *Widget, surface: *Surface, bounding_box: Rect) !void {
+    pub fn draw(self: *Widget, surface: *Surface) !void {
+        const bounding_box = self.rect;
         const cr = surface.currentBuffer().cairo_context;
         cr.setSourceSurface(self.getInner(@This()).surface, bounding_box.x, bounding_box.y);
         // log.debug("Drawing image at {} {}", .{ bounding_box.x, bounding_box.y });
@@ -115,7 +107,8 @@ pub const Text = struct {
     pub fn configure(self: *@This(), text: [:0]const u8) void {
         self.text = text;
     }
-    pub fn draw(self: *Widget, surface: *Surface, bounding_box: Rect) !void {
+    pub fn draw(self: *Widget, surface: *Surface) !void {
+        const bounding_box = self.rect;
         const cr = surface.currentBuffer().cairo_context;
         const font_description = pango.FontDescription.fromString("monospace");
         font_description.setAbsoluteSize(pango.SCALE * 11);
@@ -146,21 +139,28 @@ pub const Overlay = struct {
     pub fn configure(self: *Overlay) void {
         self.children.items.len = 0;
     }
-    fn draw(self: *Widget, surface: *Surface, bounding_box: Rect) !void {
-        const overlay = self.getInner(Overlay);
+    fn draw(self: *Widget, surface: *Surface) !void {
+        const overlay = self.getInner(@This());
         for (overlay.children.items) |child| {
-            try child.vtable.draw(child, surface, bounding_box);
+            child.rect = self.rect;
+            try child.vtable.draw(child, surface);
         }
         // try top.vtable.draw(top, surface, self.inner.overlay.top_rect);
     }
     pub fn addChild(self: *Widget, child: *Widget) !void {
         // TODO: create an special child type to allow for placing items at specific locations
-        const overlay = self.getInner(Overlay);
+        const overlay = self.getInner(@This());
         try overlay.children.append(child);
+    }
+    pub fn getChildren(self: *Widget) []*Widget {
+        // TODO: create an special child type to allow for placing items at specific locations
+        const overlay = self.getInner(@This());
+        return overlay.children.items;
     }
     pub const vtable = Widget.Vtable{
         .draw = draw,
         .addChild = addChild,
+        .getChildren = getChildren,
     };
 };
 pub const Direction = enum {
@@ -179,68 +179,104 @@ pub const Box = struct {
         self.children.items.len = 0;
         self.direction = direction;
     }
-    fn draw(self: *Widget, surface: *Surface, bounding_box: Rect) !void {
+
+    pub fn addChild(widget: *Widget, child: *Widget) !void {
+        // log.debug("adding child", .{});
+        try widget.getInner(@This()).children.append(child);
+    }
+    pub fn getChildren(widget: *Widget) []*Widget {
+        return widget.getInner(@This()).children.items;
+    }
+    pub fn proposeSize(widget: *Widget) void {
+        // TODO: iterate
+        const box = widget.getInner(@This());
+        switch (box.direction) {
+            .left, .right => {
+                var w: f32 = 0;
+                var h: f32 = 0;
+                for (box.children.items) |child| {
+                    child.vtable.proposeSize(child);
+                    w += child.rect.w;
+                    h = @max(h, child.rect.h);
+                }
+                widget.rect.h = h;
+                widget.rect.w = w;
+            },
+            .down, .up => {
+                var w: f32 = 0;
+                var h: f32 = 0;
+                for (box.children.items) |child| {
+                    child.vtable.proposeSize(child);
+                    w = @max(w, child.rect.w);
+                    h += child.rect.h;
+                }
+                widget.rect.h = h;
+                widget.rect.w = w;
+            },
+        }
+    }
+    fn draw(widget: *Widget, surface: *Surface) !void {
         // draw itself
+        const rect = widget.rect;
         const border_width = 2;
         const margin = 2;
         const padding = 3;
         const cr = surface.currentBuffer().cairo_context;
         cr.setLineWidth(border_width);
-        // log.debug("Drawing {d}x{d} Box at ({d},{d})", .{ bounding_box.width, bounding_box.height, bounding_box.x, bounding_box.y });
         cr.setSourceRgb(1, 1, 1);
         cr.roundRect(
-            bounding_box.x + margin,
-            bounding_box.y + margin,
-            bounding_box.w - margin * 2,
-            bounding_box.h - margin * 2,
+            rect.x + margin,
+            rect.y + margin,
+            rect.w - margin * 2,
+            rect.h - margin * 2,
             4,
         );
 
         // draw children
-        const box = self.getInner(@This());
+        const box = widget.getInner(@This());
         const spacing = margin + padding;
         switch (box.direction) {
             .left => {
                 var child_box = Rect{
-                    .x = bounding_box.x + spacing,
-                    .y = bounding_box.y + spacing,
+                    .x = rect.x + spacing,
+                    .y = rect.y + spacing,
                     .w = 0,
-                    .h = bounding_box.h - spacing * 2,
+                    .h = rect.h - spacing * 2,
                 };
-                const scale = (bounding_box.w - spacing * 2) / @as(f32, @floatFromInt(box.children.items.len));
+                const scale = (rect.w - spacing * 2) / @as(f32, @floatFromInt(box.children.items.len));
                 for (box.children.items) |child| {
                     const weight = 1;
                     child_box.x = child_box.x + child_box.w;
                     child_box.w = scale * weight;
-                    try child.vtable.draw(child, surface, child_box);
+                    child.rect = child_box;
+                    try child.vtable.draw(child, surface);
                 }
             },
             .right => {},
             .up => {},
             .down => {
                 var child_box = Rect{
-                    .x = bounding_box.x + spacing,
-                    .y = bounding_box.y + spacing,
-                    .w = bounding_box.w - spacing * 2,
+                    .x = rect.x + spacing,
+                    .y = rect.y + spacing,
+                    .w = rect.w - spacing * 2,
                     .h = 0,
                 };
-                const scale = (bounding_box.h - spacing * 2) / @as(f32, @floatFromInt(box.children.items.len));
+                const scale = (rect.h - spacing * 2) / @as(f32, @floatFromInt(box.children.items.len));
                 for (box.children.items) |child| {
                     const weight = 1;
                     child_box.y = child_box.y + child_box.h;
                     child_box.h = scale * weight;
-                    try child.vtable.draw(child, surface, child_box);
+                    child.rect = child_box;
+                    try child.vtable.draw(child, surface);
                 }
             },
         }
     }
-    pub fn addChild(self: *Widget, child: *Widget) !void {
-        // log.debug("adding child", .{});
-        try self.getInner(@This()).children.append(child);
-    }
     pub const vtable = Widget.Vtable{
-        .draw = draw,
         .addChild = addChild,
+        .getChildren = getChildren,
+        .draw = draw,
+        .proposeSize = proposeSize,
     };
 };
 
@@ -250,47 +286,75 @@ pub const Button = struct {
     pub fn configure(self: *Button) void {
         self.child = null;
     }
-    fn draw(self: *Widget, surface: *Surface, bounding_box: Rect) !void {
+    fn draw(self: *Widget, surface: *Surface) !void {
         // draw itself
         const border_width = 2;
         const margin = 2;
         const cr = surface.currentBuffer().cairo_context;
         cr.setLineWidth(border_width);
-        // log.debug("Drawing {d}x{d} Box at ({d},{d})", .{ bounding_box.width, bounding_box.height, bounding_box.x, bounding_box.y });
+        const rect = self.rect;
+        // log.debug("Drawing {d}x{d} Box at ({d},{d})", .{ rect.width, rect.height, rect.x, rect.y });
         cr.setSourceRgb(1, 1, 1);
         cr.roundRect(
-            bounding_box.x + margin,
-            bounding_box.y + margin,
-            bounding_box.w - margin * 2,
-            bounding_box.h - margin * 2,
+            rect.x + margin,
+            rect.y + margin,
+            rect.w - margin * 2,
+            rect.h - margin * 2,
             4,
         );
-        try self.child.vtable.draw(self.child, surface, bounding_box.subtractSpacing(margin, margin));
+        if (self.getInner(@This()).child) |child| {
+            child.rect = rect.subtractSpacing(margin, margin);
+            try child.vtable.draw(child, surface);
+        }
     }
     pub fn addChild(self: *Widget, child: *Widget) !void {
         // log.debug("adding child", .{});
-        if (self.getInner(@This()).child) |child_ptr| {
-            child_ptr = child;
+        const button = self.getInner(@This());
+        if (button.child) |_| {
+            return error.InvalidChild;
+        } else button.child = child;
+    }
+    pub fn getChildren(self: *Widget) []*Widget {
+        // don't try to dereference this
+        if (self.getInner(@This()).child) |*child_ptr| {
+            // var ret: []*Widget = undefined;
+            // ret.ptr = child_ptr;
+            return child_ptr[0..1];
+        } else {
+            var ret: []*Widget = undefined;
+            return ret[0..0];
         }
     }
-    pub fn handleInput(self: *Widget, input: *Input) !void {
-        const child = self.getInner(@This()).child;
-        const pointer = input.pointer;
-        if (!pointer.handled) {
-            // let child handle things first
-            if (child != null and pointer.in(child.rect)) child.vtable.handleInput(child, input);
-            // child might have handled things
-            if (!pointer.handled and pointer.in(self.rect)) {
-                // button press finished
-                if (pointer.button == .left and pointer.state == .released) {
-                    self.clicked = true;
-                }
+    pub fn handleInput(widget: *Widget, input: *Input) !void {
+        const pointer = &input.pointer;
+        const button = widget.getInner(@This());
+        // pointer events possible
+        if (!pointer.handled and pointer.in(widget.rect)) {
+            if (pointer.button == .left and pointer.state == .released) {
+                button.clicked = true;
+            } else {
+                button.clicked = false;
             }
+            pointer.handled = true;
+        } else {
+            button.clicked = false;
         }
-        return if (self != self.parent) self.parent.vtable.handleInput(self.parent, input);
+    }
+    pub fn proposeSize(self: *Widget) void {
+        if (self.getInner(@This()).child) |child| {
+            child.vtable.proposeSize(child);
+            self.rect.w = child.rect.w;
+            self.rect.h = child.rect.h;
+        } else {
+            self.rect.w = 1;
+            self.rect.h = 1;
+        }
     }
     pub const vtable = Widget.Vtable{
-        .draw = draw,
         .addChild = addChild,
+        .getChildren = getChildren,
+        .draw = draw,
+        .handleInput = handleInput,
+        .proposeSize = proposeSize,
     };
 };

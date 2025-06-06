@@ -80,27 +80,23 @@ fn registryListener(registry: *wl.Registry, event: wl.Registry.Event, context: *
         .global => |global| {
             if (std.mem.orderZ(u8, global.interface, wlr.LayerShellV1.interface.name) == .eq) {
                 context.layer_shell = registry.bind(global.name, wlr.LayerShellV1, 1) catch return;
-                log.debug("Bound To: {s}", .{global.interface});
             } else if (std.mem.orderZ(u8, global.interface, wl.Compositor.interface.name) == .eq) {
                 context.compositor = registry.bind(global.name, wl.Compositor, 1) catch return;
-                log.debug("Bound To: {s}", .{global.interface});
             } else if (std.mem.orderZ(u8, global.interface, wl.Shm.interface.name) == .eq) {
                 context.shm = registry.bind(global.name, wl.Shm, 1) catch return;
-                log.debug("Bound To: {s}", .{global.interface});
             } else if (std.mem.orderZ(u8, global.interface, wl.Seat.interface.name) == .eq) {
                 context.seat.wl_seat = registry.bind(global.name, wl.Seat, 1) catch return;
                 context.seat.init();
-                log.debug("Bound To: {s}", .{global.interface});
             } else if (std.mem.orderZ(u8, global.interface, xdg.WmBase.interface.name) == .eq) {
                 context.wm_base = registry.bind(global.name, xdg.WmBase, 1) catch return;
-                log.debug("Bound To: {s}", .{global.interface});
+            } else if (std.mem.orderZ(u8, global.interface, xdg.WmBase.interface.name) == .eq) {
+                context.wm_base = registry.bind(global.name, xdg.WmBase, 1) catch return;
             } else if (std.mem.orderZ(u8, global.interface, wl.Output.interface.name) == .eq) {
                 const wl_output = registry.bind(global.name, wl.Output, 1) catch return;
                 context.outputs.append(Output{
                     .wl_output = wl_output,
                 }) catch return;
                 wl_output.setListener(*Output, Output.listener, &context.outputs.items[context.outputs.items.len - 1]);
-                log.debug("Bound To: {s}", .{global.interface});
             } else {
                 // uncomment to see all globals
                 // log.debug("Not Bound: {s}", .{global.interface});
@@ -174,11 +170,6 @@ pub const Seat = struct {
     wl_keyboard: ?*wl.Keyboard = null,
     wl_touch: ?*wl.Touch = null,
     name: [*:0]const u8 = "",
-    // const Capability = packed struct {
-    //     pointer: bool = false,
-    //     keyboard: bool = false,
-    //     touch: bool = false,
-    // };
     const Surfaces = std.ArrayList(*Surface);
     fn deinit(self: *Seat) void {
         self.wl_seat.deinit();

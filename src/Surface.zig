@@ -32,7 +32,7 @@ widget: ?*Widget = null,
 widget_storage: WidgetFromId,
 allocator: std.mem.Allocator,
 seat: *Seat,
-redraw: Rect = .{},
+redraw: bool = false,
 
 // event handling
 input: Input = .{},
@@ -46,8 +46,10 @@ pub const Input = struct {
         focused: bool = false,
         handled: bool = false,
         state: KeyState = .up,
+        /// widget which handled the event, needs to be notified if we leave
+        widget: ?*Widget = null,
         pub fn in(self: *Pointer, rect: Rect) bool {
-            self.pos.in(rect);
+            return self.pos.in(rect);
         }
     };
     pub const Button = enum {
@@ -60,6 +62,9 @@ pub const Input = struct {
         back,
         task,
     };
+    pub fn transitionState(self: *Input) void {
+        self.pointer.state.transition(self.pointer.state);
+    }
     pub fn reset(self: *Input) void {
         self.pointer.handled = if (self.pointer.focused) false else true;
     }
@@ -71,8 +76,8 @@ pub const Input = struct {
         pub fn reset(self: *KeyState) void {
             self = .up;
         }
-        pub fn transition(self: *KeyState, event: anytype) void {
-            self = switch (self) {
+        pub fn transition(self: *KeyState, event: KeyState) void {
+            self.* = switch (self.*) {
                 .up, .released => if (event == .pressed) .pressed else .up,
                 .pressed, .down => if (event == .released) .released else .down,
             };
@@ -154,6 +159,7 @@ pub fn setListeners(self: *Self) !void {
     try self.seat.registerSurface(self);
 }
 pub fn notify(self: *Self, event: anytype) void {
+    self.redraw = true;
     const eventType = @TypeOf(event);
     if (eventType == wl.Pointer.Event) {
         const pointer = &self.input.pointer;
@@ -194,10 +200,11 @@ pub fn notify(self: *Self, event: anytype) void {
                 switch (data.state) {
                     .pressed => {
                         pointer.button = btn;
+                        pointer.state.transition(.pressed);
                     },
                     .released => {
                         if (pointer.button == btn) {
-                            pointer.button = null;
+                            pointer.state.transition(.released);
                         }
                     },
                     _ => unreachable,
@@ -213,13 +220,13 @@ pub fn notify(self: *Self, event: anytype) void {
 pub fn getDeepestWidgetAtPoint(self: *Self, point: Point) ?*Widget {
     if (self.widget) |initial_widget| {
         var widget = initial_widget;
-        for (1..1000) |_| { // No Infinite Loops
+        outer: for (1..1000) |_| { // No Infinite Loops
             const children = widget.vtable.getChildren(widget);
             for (0..children.len) |from_end| {
                 const i = children.len - from_end - 1;
                 if (point.in(children[i].rect)) {
                     widget = children[i];
-                    break;
+                    continue :outer;
                 }
             }
             return widget;
@@ -232,12 +239,26 @@ pub fn getDeepestWidgetAtPoint(self: *Self, point: Point) ?*Widget {
 
 /// Send inputs to the relevant widgets
 pub fn handleInputs(self: *Self) void {
-    if (self.input.pointer.focused) {
-        if (self.getDeepestWidgetAtPoint(self.input.pointer.pos)) |widget| {
-            widget.vtable.handleInput(widget, &self.input) catch {};
+    const pointer = &self.input.pointer;
+    self.input.reset();
+    if (pointer.focused) {
+        if (self.getDeepestWidgetAtPoint(pointer.pos)) |widget_initial| {
+            var widget_opt: ?*Widget = widget_initial;
+            while (widget_opt) |widget| {
+                widget.vtable.handleInput(widget, &self.input) catch {};
+                if (pointer.handled) {
+                    break;
+                } else {
+                    widget_opt = widget.parent;
+                }
+            }
+            if (pointer.widget) |prev| {
+                // we have already handled in this case
+                if (prev != widget_opt) prev.vtable.handleInput(prev, &self.input) catch {};
+            }
+            pointer.widget = widget_opt;
         }
     }
-    // TODO: Keyboard inputs
 }
 
 pub fn currentBuffer(self: *Self) *Buffer {
@@ -245,41 +266,45 @@ pub fn currentBuffer(self: *Self) *Buffer {
 }
 
 pub fn beginFrame(self: *Self) void {
-    // Check for resizes
+    // Check for inputs
+    self.handleInputs();
+    self.widget = null;
 
     // Attach correct buffer
     if (!self.currentBuffer().usable) {
-        log.debug("Buffer {} not ready, switching to {}", .{ self.current_buffer, self.current_buffer ^ 1 });
+        // log.debug("Buffer {} not ready, switching to {}", .{ self.current_buffer, self.current_buffer ^ 1 });
         self.current_buffer ^= 1;
     }
     self.wl_surface.attach(self.currentBuffer().wl_buffer, 0, 0);
 }
 
 pub fn endFrame(self: *Self) void {
-    // _ = self.buffers[0].cairo_surf.writeToPng("debug1.png");
-    // _ = self.buffers[1].cairo_surf.writeToPng("debug2.png");
+    // _ = self.currentBuffer().cairo_surf.writeToPng("debug1.png");
+    // draw
     if (self.widget) |widget| {
         // log.debug("Attempting to draw widgets", .{});
-        widget.vtable.draw(widget, self, Rect{ .w = @floatFromInt(self.width), .h = @floatFromInt(self.height) }) catch {};
-        self.handleInputs();
-        self.widget = null;
+        widget.rect = Rect{ .w = @floatFromInt(self.width), .h = @floatFromInt(self.height) };
+        widget.vtable.draw(widget, self) catch {};
     }
     self.currentBuffer().usable = false;
     self.wl_surface.damage(0, 0, math.maxInt(@TypeOf(self.width)), math.maxInt(@TypeOf(self.height)));
     self.wl_surface.commit();
+    self.redraw = false;
+    self.input.transitionState();
 }
 
 pub fn end(self: *Self, widget: *Widget) void {
     assert(widget == self.widget);
-    self.widget = widget.parent;
+    if (widget.parent) |parent| {
+        self.widget = parent;
+    }
 }
 
+/// attempt to add child
 fn addChildToCurrentWidget(self: *Self, widget: *Widget) !void {
+    widget.parent = self.widget;
     if (self.widget) |parent| {
-        widget.parent = parent;
         try parent.vtable.addChild(parent, widget);
-    } else {
-        widget.parent = widget;
     }
 }
 pub fn getWidget(self: *Self, id_gen: common.IdGenerator, T: type) !*Widget {

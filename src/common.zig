@@ -46,10 +46,10 @@ pub const Rect = struct {
 
     pub fn subtractSpacing(self: Rect, w: f32, h: f32) Rect {
         return Rect{
-            self.x + w,
-            self.y + h,
-            self.w - w * 2,
-            self.h - h * 2,
+            .x = self.x + w,
+            .y = self.y + h,
+            .w = self.w - w * 2,
+            .h = self.h - h * 2,
         };
     }
 };
@@ -59,9 +59,23 @@ pub const IdGenerator = struct {
     src: ?SourceLocation = null,
     extra: ?u32 = null,
     id: ?u32 = null,
-    const hash_u32 = std.hash.uint32;
+    // note: we are not using std.hash.uint32 because of problems with 0
+    pub fn hash_u32(input: u32) u32 {
+        var ret: []const u8 = undefined;
+        ret.ptr = @ptrCast(&input);
+        ret.len = 4;
+        return std.hash.CityHash32.hash(ret);
+    }
     fn idFromSourceLocation(location: SourceLocation) u32 {
         return hash_u32(location.line) ^ hash_u32(location.column);
+    }
+    pub fn addExtra(self: @This(), input: u32) @This() {
+        const input_hash = hash_u32(input);
+        return @This(){
+            .src = self.src,
+            .extra = if (self.extra) |prev| hash_u32(prev) ^ input_hash else hash_u32(input_hash),
+            .id = self.id,
+        };
     }
     pub fn toId(self: @This()) u32 {
         if (self.id) |id| {

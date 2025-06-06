@@ -70,7 +70,7 @@ pub fn main() !void {
         .seat = &context.seat,
     };
     const scheduler = &context.scheduler;
-    try scheduler.addRepeatTask(Task.create(*FrameData, FrameData.timerTask, &frame_data), 1000);
+    try scheduler.addRepeatTask(Task.create(*Surface, markDirty, &surface), 1000);
     var pollfds = [_]std.posix.pollfd{
         .{
             .events = std.posix.POLL.IN,
@@ -82,6 +82,9 @@ pub fn main() !void {
     while (true) {
         // log.debug("starting poll", .{});
         const timeout = context.scheduler.runPendingGetTimeInterval();
+        if (surface.redraw) {
+            try frame_data.frame();
+        }
         if (context.display.flush() != .SUCCESS) return error.DispatchFailed;
         // should we block indefinitely?
         switch (try std.posix.poll(&pollfds, timeout orelse 1)) {
@@ -104,9 +107,6 @@ pub fn main() !void {
                 assert(num_events_remaining == 0);
             },
         }
-        // std.time.ns_per_ms
-        // log.debug("{}", .{context.display.dispatchPending()});
-        // if (context.display.dispatch() != .SUCCESS) return error.DispatchFailed;
     }
 }
 
@@ -124,7 +124,7 @@ const FrameData = struct {
         const time = std.time.timestamp();
         const time_string = c.ctime((&time));
         const time_string_len = std.mem.len(time_string);
-        log.debug("{s}: drawing frame {}", .{ time_string[0 .. time_string_len - 1], self.counter });
+        // log.debug("{s}: drawing frame {}", .{ time_string[0 .. time_string_len - 1], self.counter });
         self.counter += 1;
         const s = self.surface;
         const bw = BasicWidgets{ .surface = s };
@@ -155,6 +155,12 @@ const FrameData = struct {
             } else {
                 try bw.text("Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.", .{ .src = @src() });
             }
+            const button = try bw.button("button", .{ .src = @src() });
+            if (button.clicked) log.debug("Button Clicked", .{});
         }
     }
 };
+
+pub fn markDirty(surface: *Surface) void {
+    surface.redraw = true;
+}
