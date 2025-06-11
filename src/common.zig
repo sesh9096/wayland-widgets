@@ -135,3 +135,22 @@ pub const Direction = enum {
     up,
     down,
 };
+
+pub const Expand = enum {
+    horizontal,
+    vertical,
+    both,
+    none,
+    pub fn horizontal(self: Expand) bool {
+        return switch (self) {
+            .horizontal, .both => true,
+            else => false,
+        };
+    }
+    pub fn vertical(self: Expand) bool {
+        return switch (self) {
+            .vertical, .both => true,
+            else => false,
+        };
+    }
+};

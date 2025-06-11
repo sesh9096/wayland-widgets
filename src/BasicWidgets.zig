@@ -12,6 +12,7 @@ const common = @import("./common.zig");
 const Rect = common.Rect;
 const Point = common.Point;
 const Direction = common.Direction;
+const Expand = common.Expand;
 const IdGenerator = common.IdGenerator;
 
 const Text = @import("./BasicWidgets/Text.zig");
@@ -61,17 +62,23 @@ pub fn end(self: *const Self, widget: *Widget) void {
     }
 }
 
-pub fn getBox(self: *const Self, direction: Direction, id_gen: IdGenerator) !*Widget {
+pub fn getBox(self: *const Self, direction: Direction, expand: Expand, id_gen: IdGenerator) !*Widget {
     const widget = try self.getWidget(id_gen, Box);
-    widget.getInner(Box).configure(direction);
+    widget.getInner(Box).configure(direction, expand);
 
     // const widget = try Box.widget(self.allocator, direction);
     return widget;
 }
-pub fn box(self: *const Self, direction: Direction, id_gen: IdGenerator) !*Widget {
-    const widget = try self.getBox(direction, id_gen);
+pub fn box(self: *const Self, direction: Direction, expand: Expand, id_gen: IdGenerator) !*Widget {
+    const widget = try self.getBox(direction, expand, id_gen);
     try self.addWidgetSetCurrent(widget);
     return widget;
+}
+pub fn row(self: *const Self, id_gen: IdGenerator) !*Widget {
+    return self.box(.left, .none, id_gen);
+}
+pub fn column(self: *const Self, id_gen: IdGenerator) !*Widget {
+    return self.box(.down, .none, id_gen);
 }
 
 pub fn getOverlay(self: *const Self, id_gen: IdGenerator) !*Widget {
@@ -166,9 +173,16 @@ pub const Overlay = struct {
         // TODO: create an special child type to allow for placing items at specific locations
         return self.getInner(@This()).children.items;
     }
+    pub fn proposeSize(widget: *Widget, surface: *Surface) void {
+        // TODO: iterate
+        for (widget.getInner(@This()).children.items) |child| {
+            child.vtable.proposeSize(child, surface);
+        }
+    }
     pub const vtable = Widget.Vtable{
         .draw = draw,
         .addChild = addChild,
         .getChildren = getChildren,
+        .proposeSize = proposeSize,
     };
 };

@@ -8,15 +8,18 @@ const cairo = common.cairo;
 const Direction = common.Direction;
 const Rect = common.Rect;
 const Point = common.Point;
+const Expand = common.Expand;
 const WidgetList = std.ArrayList(*Widget);
 const Box = @This();
 
 direction: Direction = .right,
+expand: Expand,
 children: WidgetList,
 pub fn init(self: *Box, allocator: std.mem.Allocator) void {
     self.children = WidgetList.init(allocator);
 }
-pub fn configure(self: *Box, direction: Direction) void {
+pub fn configure(self: *Box, direction: Direction, expand: Expand) void {
+    self.expand = expand;
     self.children.items.len = 0;
     self.direction = direction;
 }
@@ -28,7 +31,7 @@ pub fn addChild(widget: *Widget, child: *Widget) !void {
 pub fn getChildren(widget: *Widget) []*Widget {
     return widget.getInner(@This()).children.items;
 }
-pub fn proposeSize(widget: *Widget) void {
+pub fn proposeSize(widget: *Widget, surface: *Surface) void {
     // TODO: iterate
     const box = widget.getInner(@This());
     switch (box.direction) {
@@ -36,7 +39,7 @@ pub fn proposeSize(widget: *Widget) void {
             var w: f32 = 0;
             var h: f32 = 0;
             for (box.children.items) |child| {
-                child.vtable.proposeSize(child);
+                child.vtable.proposeSize(child, surface);
                 w += child.rect.w;
                 h = @max(h, child.rect.h);
             }
@@ -47,7 +50,7 @@ pub fn proposeSize(widget: *Widget) void {
             var w: f32 = 0;
             var h: f32 = 0;
             for (box.children.items) |child| {
-                child.vtable.proposeSize(child);
+                child.vtable.proposeSize(child, surface);
                 w = @max(w, child.rect.w);
                 h += child.rect.h;
             }
@@ -76,6 +79,7 @@ fn draw(widget: *Widget, surface: *Surface) !void {
     // draw children
     const box = widget.getInner(@This());
     const spacing = margin + padding;
+    const hexpand = box.expand.horizontal();
     switch (box.direction) {
         .left => {
             var child_box = Rect{
@@ -85,10 +89,11 @@ fn draw(widget: *Widget, surface: *Surface) !void {
                 .h = rect.h - spacing * 2,
             };
             const scale = (rect.w - spacing * 2) / @as(f32, @floatFromInt(box.children.items.len));
+            // expand items
             for (box.children.items) |child| {
                 const weight = 1;
                 child_box.x = child_box.x + child_box.w;
-                child_box.w = scale * weight;
+                child_box.w = if (hexpand) scale * weight else child.rect.w;
                 child.rect = child_box;
                 try child.vtable.draw(child, surface);
             }
