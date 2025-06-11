@@ -28,6 +28,7 @@ widget: ?*Widget = null,
 widget_storage: WidgetFromId,
 allocator: std.mem.Allocator,
 seat: *Seat,
+context: *Context,
 redraw: bool = false,
 pointer_widget: ?*Widget = null,
 
@@ -73,6 +74,7 @@ pub fn fromWlSurface(context: *Context, wl_surface: *wl.Surface, width: i32, hei
     const cairo_surf1 = cairo.Surface.createForData(pool.ptr + @as(usize, @intCast(buffer_size)), .ARGB32, width, height, width * 4);
     return Self{
         .wl_surface = wl_surface,
+        .context = context,
         .width = width,
         .height = height,
         .shared_memory = pool,
@@ -181,6 +183,7 @@ pub fn endFrame(self: *Self) void {
     // draw
     if (self.widget) |widget| {
         // log.debug("Attempting to draw widgets", .{});
+        widget.vtable.proposeSize(widget, self);
         widget.rect = Rect{ .w = @floatFromInt(self.width), .h = @floatFromInt(self.height) };
         widget.vtable.draw(widget, self) catch {};
     }

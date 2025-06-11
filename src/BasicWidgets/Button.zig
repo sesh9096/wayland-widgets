@@ -70,9 +70,9 @@ pub fn handleInput(widget: *Widget, surface: *Surface) !void {
         }
     }
 }
-pub fn proposeSize(self: *Widget) void {
+pub fn proposeSize(self: *Widget, surface: *Surface) void {
     if (self.getInner(@This()).child) |child| {
-        child.vtable.proposeSize(child);
+        child.vtable.proposeSize(child, surface);
         self.rect.w = child.rect.w;
         self.rect.h = child.rect.h;
     } else {

@@ -13,15 +13,15 @@ pub const Vtable = struct {
     addChild: *const fn (self: *Widget, child: *Widget) (std.mem.Allocator.Error || AddChildError)!void = addChildNotAllowed,
     /// List all children, useful for debugging and to find a widget at a certain point
     /// children should be in ordered so those on top should be at the end
-    getChildren: *const fn (self: *Widget) []*Widget = getChildrenNone,
+    getChildren: *const fn (widget: *Widget) []*Widget = getChildrenNone,
     /// draw the widget on the surface
     /// use widget.rect as the rect for drawing
-    draw: *const fn (self: *Widget, surface: *Surface) anyerror!void = drawBounding,
+    draw: *const fn (widget: *Widget, surface: *Surface) anyerror!void = drawBounding,
     /// handle input, call the corresponding function on parent if not handled
-    handleInput: *const fn (self: *Widget, Surface: *Surface) anyerror!void = handleInputDefault,
+    handleInput: *const fn (widget: *Widget, Surface: *Surface) anyerror!void = handleInputDefault,
     /// Propose a size to the parent by setting w/h of `widget.rect`.
     /// Can check children first if desired
-    proposeSize: *const fn (self: *Widget) void = proposeSizeNull,
+    proposeSize: *const fn (widget: *Widget, surface: *Surface) void = proposeSizeNull,
 };
 /// convenience function which does some coercion
 pub fn getInner(self: *Widget, T: type) *T {
@@ -62,9 +62,9 @@ pub fn drawBounding(widget: *Widget, surface: *Surface) !void {
 pub fn handleInputDefault(_: *Widget, _: *Surface) !void {}
 
 /// propose a size of nothing by default
-pub fn proposeSizeNull(self: *Widget) void {
-    self.rect.w = 0;
-    self.rect.h = 0;
+pub fn proposeSizeNull(widget: *Widget, _: *Surface) void {
+    widget.rect.w = 0;
+    widget.rect.h = 0;
 }
 
 pub fn allocateWidget(allocator: std.mem.Allocator, T: type) !*Widget {

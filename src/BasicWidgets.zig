@@ -16,6 +16,7 @@ const Expand = common.Expand;
 const IdGenerator = common.IdGenerator;
 
 const Text = @import("./BasicWidgets/Text.zig");
+const Label = @import("./BasicWidgets/Label.zig");
 const Button = @import("./BasicWidgets/Button.zig");
 const Box = @import("./BasicWidgets/Box.zig");
 
@@ -117,6 +118,12 @@ pub fn text(self: *const Self, txt: [:0]const u8, id_gen: IdGenerator) !void {
     try self.addWidget(widget);
 }
 
+pub fn getLabel(self: *const Self, txt: [:0]const u8, id_gen: IdGenerator) !*Widget {
+    const widget = try self.getWidget(id_gen, Label);
+    widget.getInner(Label).configure(txt);
+    return widget;
+}
+
 pub fn getButton(self: *const Self, id_gen: IdGenerator) !*Widget {
     const widget = try self.getWidget(id_gen, Button);
     widget.getInner(Button).configure();
@@ -125,9 +132,9 @@ pub fn getButton(self: *const Self, id_gen: IdGenerator) !*Widget {
 
 pub fn button(self: *const Self, txt: [:0]const u8, id_gen: IdGenerator) !*Button {
     const widget = try self.getButton(id_gen);
-    const text_widget = try self.getText(txt, id_gen.addExtra(0));
-    try widget.vtable.addChild(widget, text_widget);
-    text_widget.parent = widget;
+    const label_widget = try self.getLabel(txt, id_gen.addExtra(0));
+    try widget.vtable.addChild(widget, label_widget);
+    label_widget.parent = widget;
     try self.addWidget(widget);
     return widget.getInner(Button);
 }

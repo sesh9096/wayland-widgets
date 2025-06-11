@@ -12,18 +12,16 @@ text: [:0]const u8,
 pub fn configure(self: *@This(), text: [:0]const u8) void {
     self.text = text;
 }
-pub fn draw(self: *Widget, surface: *Surface) !void {
-    const bounding_box = self.rect;
+pub fn draw(widget: *Widget, surface: *Surface) !void {
+    const bounding_box = widget.rect;
     const cr = surface.currentBuffer().cairo_context;
-    const font_description = pango.FontDescription.fromString("monospace");
-    font_description.setAbsoluteSize(pango.SCALE * 11);
+    const font_description = surface.context.font.describe();
     const layout = pango.PangoCairo.createLayout(cr);
     defer layout.free();
-    defer font_description.free();
     layout.setFontDescription(font_description);
     layout.setWidth(@intFromFloat(bounding_box.w * pango.SCALE));
     layout.setHeight(@intFromFloat(bounding_box.h * pango.SCALE));
-    const text = self.getInner(@This()).text;
+    const text = widget.getInner(@This()).text;
     layout.setText(text, -1);
     cr.setSourceRgb(1, 1, 1);
     cr.moveTo(bounding_box.x, bounding_box.y);

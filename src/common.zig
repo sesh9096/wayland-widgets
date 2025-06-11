@@ -53,6 +53,29 @@ pub const Rect = struct {
             .h = self.h - h * 2,
         };
     }
+    pub fn div(self: Rect, divisor: f32) Rect {
+        return .{
+            .x = self.x / divisor,
+            .y = self.y / divisor,
+            .w = self.w / divisor,
+            .h = self.h / divisor,
+        };
+    }
+};
+// match with PangoRectangle
+pub const IRect = extern struct {
+    x: i32 = 0,
+    y: i32 = 0,
+    w: i32 = 0,
+    h: i32 = 0,
+    pub fn toRect(self: IRect) Rect {
+        return .{
+            .x = @floatFromInt(self.x),
+            .y = @floatFromInt(self.y),
+            .w = @floatFromInt(self.w),
+            .h = @floatFromInt(self.h),
+        };
+    }
 };
 
 /// Config for generating Id's, use `.id` for direct control or `.src` and optionally `.extra`

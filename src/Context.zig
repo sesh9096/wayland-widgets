@@ -17,6 +17,7 @@ const common = @import("./common.zig");
 const Rect = common.Rect;
 const Point = common.Point;
 const KeyState = common.KeyState;
+const pango = common.pango;
 const c = @cImport({
     @cInclude("linux/input-event-codes.h");
 });
@@ -30,15 +31,27 @@ wm_base: ?*xdg.WmBase = null,
 layer_shell: ?*wlr.LayerShellV1 = null,
 outputs: OutputList,
 allocator: Allocator,
+font_map: *pango.FontMap,
+pango_context: *pango.Context,
+font: *pango.Font,
 
 const Context = @This();
 pub fn init(allocator: Allocator) !@This() {
+    const font_map = pango.PangoCairo.fontMapGetDefault();
+    const pango_context = font_map.createContext();
+    pango_context.setRoundGlyphPositions(false);
+    const font_description = pango.FontDescription.fromString("monospace");
+    font_description.setAbsoluteSize(pango.SCALE * 11);
+    defer font_description.free();
     return @This(){
         .allocator = allocator,
         .display = try wl.Display.connect(null),
         .outputs = OutputList.init(allocator),
         .scheduler = Scheduler.init(allocator),
         .seat = .{ .wl_seat = undefined, .surfaces = Seat.Surfaces.init(allocator) },
+        .font_map = font_map,
+        .pango_context = pango_context,
+        .font = font_map.loadFont(pango_context, font_description),
     };
 }
 
@@ -138,8 +151,8 @@ const Output = struct {
                 log.debug("Name: {s}", .{name.name});
                 output.name = name.name;
             },
-            .geometry => {
-                log.debug("Geometry", .{});
+            .geometry => |data| {
+                log.debug("Geometry {}", .{data});
             },
             .scale => {
                 log.debug("Scale", .{});
