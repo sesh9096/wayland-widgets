@@ -80,38 +80,59 @@ fn draw(widget: *Widget, surface: *Surface) !void {
     const box = widget.getInner(@This());
     const spacing = margin + padding;
     const hexpand = box.expand.horizontal();
+    const vexpand = box.expand.vertical();
     switch (box.direction) {
-        .left => {
+        .left => {},
+        .right => {
+            var min_width: f32 = 0;
+            var total_weight: f32 = 0;
+            for (box.children.items) |child| {
+                if (child.rect.w == 0) {
+                    total_weight += 1;
+                } else {
+                    min_width += child.rect.w;
+                }
+            }
+            const remaining_space = rect.w - min_width - spacing * 2;
             var child_box = Rect{
                 .x = rect.x + spacing,
                 .y = rect.y + spacing,
                 .w = 0,
                 .h = rect.h - spacing * 2,
             };
-            const scale = (rect.w - spacing * 2) / @as(f32, @floatFromInt(box.children.items.len));
+            const scale = remaining_space / total_weight;
             // expand items
             for (box.children.items) |child| {
                 const weight = 1;
                 child_box.x = child_box.x + child_box.w;
-                child_box.w = if (hexpand) scale * weight else child.rect.w;
+                child_box.w = if (hexpand or child.rect.w == 0) scale * weight else child.rect.w;
                 child.rect = child_box;
                 try child.vtable.draw(child, surface);
             }
         },
-        .right => {},
         .up => {},
         .down => {
+            var min_width: f32 = 0;
+            var total_weight: f32 = 0;
+            for (box.children.items) |child| {
+                if (child.rect.h == 0) {
+                    total_weight += 1;
+                } else {
+                    min_width += child.rect.h;
+                }
+            }
+            const remaining_space = rect.h - min_width - spacing * 2;
             var child_box = Rect{
                 .x = rect.x + spacing,
                 .y = rect.y + spacing,
                 .w = rect.w - spacing * 2,
                 .h = 0,
             };
-            const scale = (rect.h - spacing * 2) / @as(f32, @floatFromInt(box.children.items.len));
+            const scale = remaining_space / total_weight;
             for (box.children.items) |child| {
                 const weight = 1;
                 child_box.y = child_box.y + child_box.h;
-                child_box.h = scale * weight;
+                child_box.h = if (vexpand or child.rect.h == 0) scale * weight else child.rect.h;
                 child.rect = child_box;
                 try child.vtable.draw(child, surface);
             }

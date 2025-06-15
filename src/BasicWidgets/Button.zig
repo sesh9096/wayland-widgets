@@ -16,8 +16,8 @@ pub fn configure(self: *Button) void {
 }
 fn draw(self: *Widget, surface: *Surface) !void {
     // draw itself
-    const border_width = 2;
-    const margin = 2;
+    const border_width = 1;
+    const margin = 0;
     const cr = surface.currentBuffer().cairo_context;
     cr.setLineWidth(border_width);
     const rect = self.rect;
@@ -28,7 +28,7 @@ fn draw(self: *Widget, surface: *Surface) !void {
         rect.y + margin,
         rect.w - margin * 2,
         rect.h - margin * 2,
-        4,
+        1,
     );
     if (self.getInner(@This()).child) |child| {
         child.rect = rect.subtractSpacing(margin, margin);

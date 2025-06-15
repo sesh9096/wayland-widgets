@@ -76,7 +76,7 @@ pub fn box(self: *const Self, direction: Direction, expand: Expand, id_gen: IdGe
     return widget;
 }
 pub fn row(self: *const Self, id_gen: IdGenerator) !*Widget {
-    return self.box(.left, .none, id_gen);
+    return self.box(.right, .none, id_gen);
 }
 pub fn column(self: *const Self, id_gen: IdGenerator) !*Widget {
     return self.box(.down, .none, id_gen);

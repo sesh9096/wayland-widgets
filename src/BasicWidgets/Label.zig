@@ -28,8 +28,8 @@ pub fn draw(widget: *Widget, surface: *Surface) !void {
     cr.setSourceRgb(1, 1, 1);
     cr.moveTo(bounding_box.x, bounding_box.y);
     cr.setLineWidth(1);
-    cr.setSourceRgb(1, 1, 1);
     pango.PangoCairo.showLayout(cr, label.layout.?);
+
     // pango.PangoCairo.showGlyphString(cr, font, label.glyphs);
     // log.debug("{}", .{widget.rect});
     // log.debug("Drawing text {} at {} {}", .{ text, bounding_box.x, bounding_box.y });
@@ -45,8 +45,9 @@ pub fn proposeSize(widget: *Widget, surface: *Surface) void {
     layout.setText(text, @intCast(text.len));
     label.layout = layout;
     var rect: common.IRect = undefined;
-    _ = layout.getExtents(null, &rect);
-    widget.rect = rect.toRect().div(@floatFromInt(pango.SCALE));
+    _ = layout.getPixelExtents(null, &rect);
+    rect.w += 10; // why????
+    widget.rect = rect.toRect();
 
     // const attr_list = pango.AttrList.new();
     // defer attr_list.unref();
