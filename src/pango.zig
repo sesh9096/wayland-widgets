@@ -29,11 +29,24 @@ pub const Layout = opaque {
     extern fn pango_layout_get_height(self: *Layout) i32;
     pub const getHeight = pango_layout_get_height;
 
-    extern fn pango_layout_get_extents(self: *Layout, ink_rect: ?*IRect, logical_rect: ?*IRect) i32;
+    extern fn pango_layout_get_extents(self: *const Layout, ink_rect: ?*IRect, logical_rect: ?*IRect) i32;
     pub const getExtents = pango_layout_get_extents;
+
+    extern fn pango_layout_get_pixel_extents(self: *const Layout, ink_rect: ?*IRect, logical_rect: ?*IRect) i32;
+    pub const getPixelExtents = pango_layout_get_pixel_extents;
+
+    extern fn pango_layout_get_line_readonly(self: *const Layout, line: i32) ?*const LayoutLine;
+    pub const getLineReadonly = pango_layout_get_line_readonly;
 
     extern fn g_object_unref(self: *Layout) void;
     pub const free = g_object_unref;
+};
+pub const LayoutLine = opaque {
+    extern fn pango_layout_line_get_extents(self: *const LayoutLine, ink_rect: ?*IRect, logical_rect: ?*IRect) i32;
+    pub const getExtents = pango_layout_line_get_extents;
+
+    extern fn pango_layout_line_get_pixel_extents(self: *const LayoutLine, ink_rect: ?*IRect, logical_rect: ?*IRect) i32;
+    pub const getPixelExtents = pango_layout_line_get_pixel_extents;
 };
 
 pub const FontDescription = opaque {

@@ -6,6 +6,7 @@ const assert = std.debug.assert;
 const SourceLocation = std.builtin.SourceLocation;
 pub const cairo = @import("./cairo.zig");
 pub const pango = @import("./pango.zig");
+pub const style = @import("./style.zig");
 pub const Surface = @import("./Surface.zig");
 pub const Widget = @import("./Widget.zig");
 pub const Point = struct {

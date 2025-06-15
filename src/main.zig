@@ -7,6 +7,7 @@ const wayland = @import("wayland");
 const wl = wayland.client.wl;
 const xdg = wayland.client.xdg;
 const wlr = wayland.client.zwlr;
+const style = @import("./style.zig");
 const cairo = @import("./cairo.zig");
 const Window = @import("./LayerSurfaceWindow.zig");
 const Scheduler = @import("./Scheduler.zig");
@@ -157,6 +158,11 @@ const FrameData = struct {
             const button = try bw.button("button", .{ .src = @src() });
             if (button.clicked) log.debug("Button Clicked", .{});
         }
+        // const buf8 = s.currentBuffer().shared_memory;
+        // var buf32: []u32 = undefined;
+        // buf32.ptr = @alignCast(@ptrCast(buf8.ptr));
+        // buf32.len = buf8.len / 4;
+        // @memset(buf32, @bitCast(try style.Color.fromString("#00ff0000")));
     }
 };
 

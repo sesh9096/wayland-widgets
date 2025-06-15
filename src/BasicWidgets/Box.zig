@@ -67,7 +67,7 @@ fn draw(widget: *Widget, surface: *Surface) !void {
     const padding = 3;
     const cr = surface.currentBuffer().cairo_context;
     cr.setLineWidth(border_width);
-    cr.setSourceRgb(1, 1, 1);
+    try cr.setSourceColor(.{ .r = 0xff, .g = 0xff, .b = 0xff });
     cr.roundRect(
         rect.x + margin,
         rect.y + margin,

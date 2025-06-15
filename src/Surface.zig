@@ -70,8 +70,8 @@ pub fn fromWlSurface(context: *Context, wl_surface: *wl.Surface, width: i32, hei
     defer shm_pool.destroy();
 
     // const cairo_surf = cairo.Surface.createForData(pool.ptr, .ARGB32, width, height, width * 4);
-    const cairo_surf0 = cairo.Surface.createForData(pool.ptr, .ARGB32, width, height, width * 4);
-    const cairo_surf1 = cairo.Surface.createForData(pool.ptr + @as(usize, @intCast(buffer_size)), .ARGB32, width, height, width * 4);
+    const cairo_surf0 = cairo.Surface.createForData(pool.ptr, .ARGB32, width, height, cairo.formatStrideForWidth(.ARGB32, width));
+    const cairo_surf1 = cairo.Surface.createForData(pool.ptr + @as(usize, @intCast(buffer_size)), .ARGB32, width, height, cairo.formatStrideForWidth(.ARGB32, width));
     return Self{
         .wl_surface = wl_surface,
         .context = context,
@@ -83,13 +83,13 @@ pub fn fromWlSurface(context: *Context, wl_surface: *wl.Surface, width: i32, hei
         .seat = &context.seat,
         .buffers = .{
             Buffer{
-                .wl_buffer = try shm_pool.createBuffer(0, width, height, width * 4, .xrgb8888),
+                .wl_buffer = try shm_pool.createBuffer(0, width, height, width * 4, .argb8888),
                 .shared_memory = pool[0..@intCast(buffer_size)],
                 .cairo_surf = cairo_surf0,
                 .cairo_context = cairo.Context.create(cairo_surf0),
             },
             Buffer{
-                .wl_buffer = try shm_pool.createBuffer(buffer_size, width, height, width * 4, .xrgb8888),
+                .wl_buffer = try shm_pool.createBuffer(buffer_size, width, height, width * 4, .argb8888),
                 .shared_memory = pool[@intCast(buffer_size)..],
                 .cairo_surf = cairo_surf1,
                 .cairo_context = cairo.Context.create(cairo_surf1),
@@ -163,6 +163,9 @@ pub fn handleInputs(self: *Self) void {
 
 pub fn currentBuffer(self: *Self) *Buffer {
     return &self.buffers[self.current_buffer];
+}
+pub fn getCairoContext(self: *Self) *cairo.Context {
+    return self.currentBuffer().cairo_context;
 }
 
 pub fn beginFrame(self: *Self) void {

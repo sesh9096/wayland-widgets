@@ -1,6 +1,8 @@
 //! A wrapper around cairo
 const std = @import("std");
 const pi = std.math.pi;
+const style = @import("./style.zig");
+const Color = style.Color;
 
 const c = @cImport({
     @cInclude("cairo/cairo.h");
@@ -57,13 +59,24 @@ pub const Context = opaque {
 
     pub fn roundRect(self: *Context, x: f64, y: f64, width: f64, height: f64, radius: f64) void {
         const halfPi = pi / 2.0;
-        self.moveTo(x, y);
+        self.moveTo(x, y + radius);
         self.arc(x + radius, y + radius, radius, 2 * halfPi, 3 * halfPi);
         self.arc(x + width - radius, y + radius, radius, 3 * halfPi, 4 * halfPi);
         self.arc(x + width - radius, y + height - radius, radius, 0 * halfPi, 1 * halfPi);
         self.arc(x + radius, y + height - radius, radius, 1 * halfPi, 2 * halfPi);
         self.closePath();
         self.stroke();
+    }
+    pub fn setSourceColor(self: *Context, color_any: anytype) !void {
+        // Note: this does NOT check all cases, just some more common ones
+        const color = try Color.fromAny(color_any);
+        const max_u8: f32 = @floatFromInt(std.math.maxInt(u8));
+        self.setSourceRgba(
+            @as(f32, @floatFromInt(color.r)) / max_u8,
+            @as(f32, @floatFromInt(color.g)) / max_u8,
+            @as(f32, @floatFromInt(color.b)) / max_u8,
+            @as(f32, @floatFromInt(color.a)) / max_u8,
+        );
     }
 };
 
@@ -96,6 +109,8 @@ pub const Surface = opaque {
     //     return surface;
     // }
 };
+extern fn cairo_format_stride_for_width(format: Format, width: i32) i32;
+pub const formatStrideForWidth = cairo_format_stride_for_width;
 
 pub const Format = enum(c_int) {
     INVALID = c.CAIRO_FORMAT_INVALID,
