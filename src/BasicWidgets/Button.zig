@@ -7,6 +7,7 @@ const Widget = common.Widget;
 const cairo = common.cairo;
 const Rect = common.Rect;
 const Point = common.Point;
+const Styles = common.style.Styles;
 const Button = @This();
 
 child: ?*Widget,
@@ -14,30 +15,18 @@ clicked: bool = false,
 pub fn configure(self: *Button) void {
     self.child = null;
 }
-fn draw(self: *Widget, surface: *Surface) !void {
+fn draw(widget: *Widget, surface: *Surface) !void {
     // draw itself
-    const border_width = 1;
-    const margin = 0;
-    const cr = surface.currentBuffer().cairo_context;
-    cr.setLineWidth(border_width);
-    const rect = self.rect;
-    // log.debug("Drawing {d}x{d} Box at ({d},{d})", .{ rect.width, rect.height, rect.x, rect.y });
-    cr.setSourceRgb(1, 1, 1);
-    cr.roundRect(
-        rect.x + margin,
-        rect.y + margin,
-        rect.w - margin * 2,
-        rect.h - margin * 2,
-        1,
-    );
-    if (self.getInner(@This()).child) |child| {
-        child.rect = rect.subtractSpacing(margin, margin);
+    // const cr = surface.getCairoContext();
+    const rect = widget.drawDecorationAdjustSize(surface);
+    if (widget.getInner(@This()).child) |child| {
+        child.rect = rect;
         try child.vtable.draw(child, surface);
     }
 }
-pub fn addChild(self: *Widget, child: *Widget) !void {
+pub fn addChild(widget: *Widget, child: *Widget) !void {
     // log.debug("adding child", .{});
-    const button = self.getInner(@This());
+    const button = widget.getInner(@This());
     if (button.child) |_| {
         return error.InvalidChild;
     } else button.child = child;
@@ -80,6 +69,11 @@ pub fn proposeSize(self: *Widget, surface: *Surface) void {
         self.rect.h = 1;
     }
 }
+pub const default_style = Styles{
+    .parent = null,
+    .items = &.{ .{ .border_radius = 4 }, .{ .border_width = 1 } },
+};
+pub var style = &default_style;
 pub const vtable = Widget.Vtable{
     .addChild = addChild,
     .getChildren = getChildren,

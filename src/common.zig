@@ -8,7 +8,13 @@ pub const cairo = @import("./cairo.zig");
 pub const pango = @import("./pango.zig");
 pub const style = @import("./style.zig");
 pub const Surface = @import("./Surface.zig");
+pub const Scheduler = @import("./Scheduler.zig");
 pub const Widget = @import("./Widget.zig");
+pub const c = @cImport({
+    @cInclude("cairo/cairo.h");
+    @cInclude("pango/pangocairo.h");
+    @cInclude("time.h");
+});
 pub const Point = struct {
     x: f32 = 0,
     y: f32 = 0,

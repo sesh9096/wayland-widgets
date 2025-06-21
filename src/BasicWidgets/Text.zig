@@ -13,8 +13,8 @@ pub fn configure(self: *@This(), text: [:0]const u8) void {
     self.text = text;
 }
 pub fn draw(widget: *Widget, surface: *Surface) !void {
-    const bounding_box = widget.rect;
-    const cr = surface.currentBuffer().cairo_context;
+    const cr = surface.getCairoContext();
+    const bounding_box = widget.drawDecorationAdjustSize(surface);
     const font_description = surface.context.font.describe();
     const layout = pango.PangoCairo.createLayout(cr);
     defer layout.free();

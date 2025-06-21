@@ -15,10 +15,10 @@ const Direction = common.Direction;
 const Expand = common.Expand;
 const IdGenerator = common.IdGenerator;
 
-const Text = @import("./BasicWidgets/Text.zig");
-const Label = @import("./BasicWidgets/Label.zig");
-const Button = @import("./BasicWidgets/Button.zig");
-const Box = @import("./BasicWidgets/Box.zig");
+pub const Text = @import("./BasicWidgets/Text.zig");
+pub const Label = @import("./BasicWidgets/Label.zig");
+pub const Button = @import("./BasicWidgets/Button.zig");
+pub const Box = @import("./BasicWidgets/Box.zig");
 
 surface: *Surface,
 
@@ -93,18 +93,18 @@ pub fn overlay(self: *const Self, id_gen: IdGenerator) !*Widget {
     return widget;
 }
 
-pub fn getImage(self: *const Self, path: [:0]const u8, id_gen: IdGenerator) !*Widget {
+pub fn getImage(self: *const Self, path: [:0]const u8, option: Image.Option, id_gen: IdGenerator) !*Widget {
     const image_surface = cairo.Surface.createFromPng(path);
     if (image_surface.status() != .SUCCESS) {
         log.err("{}", .{image_surface.status()});
     }
 
     const widget = try self.getWidget(id_gen, Image);
-    widget.getInner(Image).configure(image_surface);
+    widget.getInner(Image).configure(image_surface, option);
     return widget;
 }
-pub fn image(self: *const Self, path: [:0]const u8, id_gen: IdGenerator) !void {
-    const widget = try self.getImage(path, id_gen);
+pub fn image(self: *const Self, path: [:0]const u8, option: Image.Option, id_gen: IdGenerator) !void {
+    const widget = try self.getImage(path, option, id_gen);
     try self.addWidget(widget);
 }
 
@@ -141,14 +141,41 @@ pub fn button(self: *const Self, txt: [:0]const u8, id_gen: IdGenerator) !*Butto
 
 pub const Image = struct {
     surface: *const cairo.Surface,
-    pub fn configure(self: *@This(), surface: *const cairo.Surface) void {
-        self.* = Image{ .surface = surface };
+    option: Option = .stretch,
+    size: Point,
+    pub const Option = enum { stretch, fit, fill, center, tile };
+    pub fn configure(self: *@This(), surface: *const cairo.Surface, option: Option) void {
+        self.surface = surface;
+        self.option = option;
+        self.size = .{ .x = @floatFromInt(surface.getWidth()), .y = @floatFromInt(surface.getHeight()) };
     }
     pub fn draw(self: *Widget, surface: *Surface) !void {
-        const bounding_box = self.rect;
+        const rect = self.rect;
         const cr = surface.currentBuffer().cairo_context;
-        cr.setSourceSurface(self.getInner(@This()).surface, bounding_box.x, bounding_box.y);
+        const image_surface = self.getInner(@This()).surface;
+        const option = self.getInner(@This()).option;
+        const size = self.getInner(@This()).size;
+        cr.save();
+        defer cr.restore();
         // log.debug("Drawing image at {} {}", .{ bounding_box.x, bounding_box.y });
+        switch (option) {
+            .stretch => {
+                cr.scale(rect.w / size.x, rect.h / size.y);
+                cr.setSourceSurface(image_surface, rect.x, rect.y);
+            },
+            .fit => {
+                cr.setSourceSurface(image_surface, rect.x, rect.y);
+            },
+            .fill => {
+                cr.setSourceSurface(image_surface, rect.x, rect.y);
+            },
+            .center => {
+                cr.setSourceSurface(image_surface, rect.x, rect.y);
+            },
+            .tile => {
+                cr.setSourceSurface(image_surface, rect.x, rect.y);
+            },
+        }
         cr.paint();
     }
     pub const vtable = Widget.Vtable{
@@ -165,9 +192,10 @@ pub const Overlay = struct {
     pub fn configure(self: *Overlay) void {
         self.children.items.len = 0;
     }
-    fn draw(self: *Widget, surface: *Surface) !void {
-        for (self.getInner(@This()).children.items) |child| {
-            child.rect = self.rect;
+    fn draw(widget: *Widget, surface: *Surface) !void {
+        const rect = widget.drawDecorationAdjustSize(surface);
+        for (widget.getInner(@This()).children.items) |child| {
+            child.rect = rect;
             try child.vtable.draw(child, surface);
         }
         // try top.vtable.draw(top, surface, self.inner.overlay.top_rect);

@@ -4,9 +4,8 @@ const cairo = @import("./cairo.zig");
 const common = @import("./common.zig");
 pub const IRect = common.IRect;
 
-const c = @cImport({
-    @cInclude("pango/pangocairo.h");
-});
+const c = common.c;
+
 pub const Layout = opaque {
     extern fn pango_layout_set_font_description(self: *Layout, description: *FontDescription) void;
     pub const setFontDescription = pango_layout_set_font_description;

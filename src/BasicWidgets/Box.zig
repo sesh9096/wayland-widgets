@@ -61,24 +61,17 @@ pub fn proposeSize(widget: *Widget, surface: *Surface) void {
 }
 fn draw(widget: *Widget, surface: *Surface) !void {
     // draw itself
-    const rect = widget.rect;
-    const border_width = 2;
-    const margin = 2;
-    const padding = 3;
-    const cr = surface.currentBuffer().cairo_context;
-    cr.setLineWidth(border_width);
-    try cr.setSourceColor(.{ .r = 0xff, .g = 0xff, .b = 0xff });
-    cr.roundRect(
-        rect.x + margin,
-        rect.y + margin,
-        rect.w - margin * 2,
-        rect.h - margin * 2,
-        4,
-    );
+    // const cr = surface.getCairoContext();
+    var rect = widget.drawDecorationAdjustSize(surface);
+    // cr.setLineWidth(border_width);
+    // cr.setSourceColor(.{ .r = 0xff, .g = 0xff, .b = 0xff });
+    // cr.roundRect(
+    //     rect.subtractSpacing(margin, margin),
+    //     4,
+    // );
 
     // draw children
     const box = widget.getInner(@This());
-    const spacing = margin + padding;
     const hexpand = box.expand.horizontal();
     const vexpand = box.expand.vertical();
     switch (box.direction) {
@@ -93,20 +86,15 @@ fn draw(widget: *Widget, surface: *Surface) !void {
                     min_width += child.rect.w;
                 }
             }
-            const remaining_space = rect.w - min_width - spacing * 2;
-            var child_box = Rect{
-                .x = rect.x + spacing,
-                .y = rect.y + spacing,
-                .w = 0,
-                .h = rect.h - spacing * 2,
-            };
+            const remaining_space = rect.w - min_width;
+            rect.w = 0;
             const scale = remaining_space / total_weight;
             // expand items
             for (box.children.items) |child| {
                 const weight = 1;
-                child_box.x = child_box.x + child_box.w;
-                child_box.w = if (hexpand or child.rect.w == 0) scale * weight else child.rect.w;
-                child.rect = child_box;
+                rect.x = rect.x + rect.w;
+                rect.w = if (hexpand or child.rect.w == 0) scale * weight else child.rect.w;
+                child.rect = rect;
                 try child.vtable.draw(child, surface);
             }
         },
@@ -121,19 +109,14 @@ fn draw(widget: *Widget, surface: *Surface) !void {
                     min_width += child.rect.h;
                 }
             }
-            const remaining_space = rect.h - min_width - spacing * 2;
-            var child_box = Rect{
-                .x = rect.x + spacing,
-                .y = rect.y + spacing,
-                .w = rect.w - spacing * 2,
-                .h = 0,
-            };
+            const remaining_space = rect.h - min_width;
+            rect.h = 0;
             const scale = remaining_space / total_weight;
             for (box.children.items) |child| {
                 const weight = 1;
-                child_box.y = child_box.y + child_box.h;
-                child_box.h = if (vexpand or child.rect.h == 0) scale * weight else child.rect.h;
-                child.rect = child_box;
+                rect.y = rect.y + rect.h;
+                rect.h = if (vexpand or child.rect.h == 0) scale * weight else child.rect.h;
+                child.rect = rect;
                 try child.vtable.draw(child, surface);
             }
         },

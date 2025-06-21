@@ -2,11 +2,13 @@ const std = @import("std");
 const common = @import("./common.zig");
 const Surface = common.Surface;
 const Rect = common.Rect;
+const Styles = common.style.Styles;
 const Widget = @This();
 
 inner: *anyopaque,
 parent: ?*Widget = null,
 rect: Rect = .{},
+styles: ?*const Styles = null,
 vtable: *const Vtable = &.{},
 pub const Vtable = struct {
     /// add a child to the widget
@@ -44,18 +46,7 @@ pub fn getChildrenNone(_: *Widget) []*Widget {
 /// for widgets which are base nodes
 pub fn drawBounding(widget: *Widget, surface: *Surface) !void {
     // log.debug("Default drawing", .{});
-    const cr = surface.currentBuffer().cairo_context;
-    const bounding_box = widget.rect;
-    const thickness = 3;
-    cr.setLineWidth(thickness);
-    cr.setSourceRgb(1, 0.5, 0.5);
-    cr.roundRect(
-        bounding_box.x,
-        bounding_box.y,
-        bounding_box.w,
-        bounding_box.h,
-        10,
-    );
+    _ = widget.drawDecorationAdjustSize(surface);
 }
 
 /// send input to parent
@@ -67,13 +58,34 @@ pub fn proposeSizeNull(widget: *Widget, _: *Surface) void {
     widget.rect.h = 0;
 }
 
-pub fn allocateWidget(allocator: std.mem.Allocator, T: type) !*Widget {
+pub fn createWidget(surface: *Surface, T: type) !*Widget {
+    const allocator = surface.allocator;
     const wid = try allocator.create(Widget);
     errdefer allocator.destroy(wid);
-    const wid_data = try allocator.create(T);
+    const inner = try allocator.create(T);
+    if (@hasDecl(T, "init")) inner.init(surface.allocator);
+    if (@hasDecl(T, "surface")) inner.surface = surface;
     wid.* = Widget{
         .vtable = &T.vtable,
-        .inner = wid_data,
+        .inner = inner,
+        .styles = if (@hasDecl(T, "style")) T.style else null,
     };
     return wid;
+}
+
+pub fn drawDecorationAdjustSize(widget: *Widget, surface: *Surface) Rect {
+    const cr = surface.getCairoContext();
+    const rect = widget.rect;
+    const style = if (widget.styles) |style| style else surface.styles;
+    const fallback = if (widget.styles) |_| surface.styles else null;
+    const padding = style.getAttribute(.padding, fallback);
+    const margin = style.getAttribute(.margin, fallback);
+    const border_rect = rect.subtractSpacing(margin, margin);
+    cr.setLineWidth(style.getAttribute(.border_width, fallback));
+    cr.roundRect(border_rect, style.getAttribute(.border_radius, fallback));
+    cr.setSourceColor(style.getAttribute(.border_color, fallback));
+    cr.strokePreserve();
+    cr.setSourceColor(style.getAttribute(.bg_color, fallback));
+    cr.fill();
+    return rect.subtractSpacing(padding, padding);
 }

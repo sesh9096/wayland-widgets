@@ -19,14 +19,14 @@ pub fn configure(self: *@This(), text: [:0]const u8) void {
     self.text = text;
 }
 pub fn draw(widget: *Widget, surface: *Surface) !void {
-    const bounding_box = widget.rect;
-    const cr = surface.currentBuffer().cairo_context;
+    const cr = surface.getCairoContext();
+    const rect = widget.drawDecorationAdjustSize(surface);
     const label = widget.getInner(@This());
     defer label.layout = null;
     defer label.layout.?.free();
 
     cr.setSourceRgb(1, 1, 1);
-    cr.moveTo(bounding_box.x, bounding_box.y);
+    cr.moveTo(rect.x, rect.y);
     cr.setLineWidth(1);
     pango.PangoCairo.showLayout(cr, label.layout.?);
 

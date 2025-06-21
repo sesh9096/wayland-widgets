@@ -1,7 +1,19 @@
 const std = @import("std");
 const log = std.log;
+const assert = std.debug.assert;
 const common = @import("./common.zig");
+const Rect = common.Rect;
+const cairo = common.cairo;
 pub const Font = common.pango.Font;
+pub const Surface = common.Surface;
+
+pub var default_styles: Styles = Styles{
+    .parent = null,
+    .items = &.{.{ .theme = &default_theme }},
+};
+pub var default_theme = Theme{
+    .default_font = undefined,
+};
 
 /// argb Color
 pub const Color = packed struct(u32) {
@@ -9,10 +21,30 @@ pub const Color = packed struct(u32) {
     r: u8 = 0,
     g: u8 = 0,
     b: u8 = 0,
-    pub fn fromString(str: [:0]const u8) !Color {
+    pub const ParseIntError = std.fmt.ParseIntError;
+    pub fn fromString(str: [:0]const u8) ParseIntError!Color {
         const hex = if (str[0] == '#') str[1..] else if (str[0] == '0' and str[1] == 'x') str[2..] else str;
-        const color = try std.fmt.parseInt(u32, hex, 16);
-        return @as(Color, @bitCast(color));
+        if (hex.len == 3) {
+            return fromStringShort(hex);
+        }
+        const bits = try std.fmt.parseInt(u32, hex, 16);
+        return @as(Color, @bitCast(bits));
+    }
+    fn fromStringShort(str: [:0]const u8) ParseIntError!Color {
+        assert(str.len == 3);
+        return .{
+            .r = try hexToNum(str[0]) << 4,
+            .g = try hexToNum(str[1]) << 4,
+            .b = try hexToNum(str[2]) << 4,
+        };
+    }
+    fn hexToNum(hex: u8) ParseIntError!u8 {
+        return switch (hex) {
+            '0'...'9' => hex - '0',
+            'a'...'f' => hex - 'a' + 10,
+            'A'...'F' => hex - 'A' + 10,
+            else => ParseIntError.InvalidCharacter,
+        };
     }
     pub fn fromAny(color_any: anytype) !Color {
         return switch (@typeInfo(@TypeOf(color_any))) {
@@ -22,21 +54,80 @@ pub const Color = packed struct(u32) {
             else => @compileError("Bad Type of color_any: " ++ @typeName(@TypeOf(color_any))),
         };
     }
+    pub fn fromAnyNoError(color_any: anytype) Color {
+        return fromAny(color_any) catch unreachable;
+    }
 };
+pub const color = Color.fromAnyNoError;
 
-pub const Style = union(enum) {
-    bg_color: Color,
-    fg_color: Color,
-    font: *Font,
+/// Override defaults for widget or widgets
+pub const StyleItem = union(enum) {
     margin: f32,
     padding: f32,
-    border: f32,
+    border_width: f32,
     border_radius: f32,
+
+    bg_color: Color,
+    fg_color: Color,
+    border_color: Color,
+    accent_color: Color,
+
+    defualt_font: *const Font,
+    variable_font: *const Font,
+
+    theme: *const Theme,
 };
-pub const Styles = []const Style;
+
+/// Setting all styles at once, can be the base of a Style chain
+pub const Theme = struct {
+    margin: f32 = 0,
+    padding: f32 = 0,
+    border_width: f32 = 0,
+    border_radius: f32 = 0,
+
+    bg_color: Color = color("#10101010"),
+    fg_color: Color = color("#ccc"),
+    border_color: Color = color("#ccc"),
+    accent_color: Color = color("#a50"),
+
+    default_font: *const Font,
+    variable_font: ?*const Font = null,
+
+    pub fn getAttribute(self: Theme, attribute: anytype) std.meta.TagPayload(StyleItem, attribute) {
+        const tag: std.meta.Tag(StyleItem) = attribute;
+        return @field(self, @tagName(tag));
+    }
+};
+
+/// a tree style list of style overrides
+/// note: searching can become slow if there are too many layers
+pub const Styles = struct {
+    parent: ?*Styles,
+    items: []const StyleItem,
+    /// draw border and background and return the new size of the rect
+    pub fn getAttribute(self: *const Styles, attribute: anytype, fallback: ?*const Styles) std.meta.TagPayload(StyleItem, attribute) {
+        if (self.getAttributeNullable(attribute)) |attr| {
+            return attr;
+        } else if (self != fallback and fallback != null) {
+            if (fallback.?.getAttributeNullable(attribute)) |attr| {
+                return attr;
+            }
+        }
+        log.warn("Fallback is null or has no attribute " ++ @tagName(attribute) ++ ", looking in default theme", .{});
+        return default_theme.getAttribute(attribute);
+    }
+    pub fn getAttributeNullable(self: *const Styles, attribute: anytype) ?std.meta.TagPayload(StyleItem, attribute) {
+        for (self.items) |style| {
+            if (style == attribute) {
+                return @field(style, @tagName(attribute));
+            } else if (style == .theme) {
+                return style.theme.getAttribute(attribute);
+            }
+        }
+        return if (self.parent) |parent| parent.getAttributeNullable(attribute) else null;
+    }
+};
 
 test "info" {
-    std.debug.print("Style Size: {} bytes\n", .{@sizeOf(Style)});
+    std.debug.print("Style Size: {} bytes\n", .{@sizeOf(StyleItem)});
 }
-
-pub const Theme = struct {};

@@ -5,8 +5,8 @@ const log = std.log;
 const math = std.math;
 const assert = std.debug.assert;
 const main = @import("./main.zig");
-const Context = main.Context;
-const Seat = main.Seat;
+const Context = @import("./Context.zig");
+const Seat = Context.Seat;
 const wayland = @import("wayland");
 const wl = wayland.client.wl;
 const xdg = wayland.client.xdg;
@@ -16,6 +16,7 @@ const common = @import("./common.zig");
 const Widget = common.Widget;
 const Rect = common.Rect;
 const Point = common.Point;
+const style = common.style;
 const WidgetFromId = std.AutoHashMap(u32, *Widget);
 
 wl_surface: *wl.Surface,
@@ -29,6 +30,7 @@ widget_storage: WidgetFromId,
 allocator: std.mem.Allocator,
 seat: *Seat,
 context: *Context,
+styles: *style.Styles,
 redraw: bool = false,
 pointer_widget: ?*Widget = null,
 
@@ -81,6 +83,7 @@ pub fn fromWlSurface(context: *Context, wl_surface: *wl.Surface, width: i32, hei
         .widget_storage = WidgetFromId.init(allocator),
         .allocator = allocator,
         .seat = &context.seat,
+        .styles = &style.default_styles,
         .buffers = .{
             Buffer{
                 .wl_buffer = try shm_pool.createBuffer(0, width, height, width * 4, .argb8888),
@@ -216,11 +219,8 @@ pub fn getWidget(self: *Self, id_gen: common.IdGenerator, T: type) !*Widget {
     const get_or_put_res = try self.widget_storage.getOrPut(id);
     const widget = if (get_or_put_res.found_existing) get_or_put_res.value_ptr.* else blk: {
         // log.debug("Created {s} widget with id {}", .{ @typeName(T), id });
-        const wid = try Widget.allocateWidget(self.allocator, T);
+        const wid = try Widget.createWidget(self, T);
         get_or_put_res.value_ptr.* = wid;
-        const inner: *T = @ptrCast(@alignCast(wid.inner));
-        if (@hasDecl(T, "init")) inner.init(self.allocator);
-        if (@hasDecl(T, "surface")) inner.surface = self;
         break :blk wid;
     };
     return widget;

@@ -3,23 +3,18 @@ const log = std.log;
 const math = std.math;
 const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
-const wayland = @import("wayland");
-const wl = wayland.client.wl;
-const xdg = wayland.client.xdg;
-const wlr = wayland.client.zwlr;
+const common = @import("./common.zig");
 const style = @import("./style.zig");
-const cairo = @import("./cairo.zig");
 const Window = @import("./LayerSurfaceWindow.zig");
 const Scheduler = @import("./Scheduler.zig");
 const Task = Scheduler.Task;
 const Surface = @import("./Surface.zig");
 pub const Context = @import("./Context.zig");
 pub const BasicWidgets = @import("./BasicWidgets.zig");
+pub const StatusWidgets = @import("./StatusWidgets.zig");
 pub const Seat = Context.Seat;
 pub const Windows = std.ArrayList(Window);
-const c = @cImport({
-    @cInclude("time.h");
-});
+const c = common.c;
 
 const Options = struct {
     filename: ?[:0]const u8 = null,
@@ -133,7 +128,7 @@ const FrameData = struct {
             defer s.endFrame();
             const overlay = try bw.overlay(.{ .src = @src() });
             defer bw.end(overlay);
-            try bw.image("/home/ss/pictures/draw/experiment.png", .{ .src = @src() });
+            try bw.image("/home/ss/pictures/draw/experiment.png", .stretch, .{ .src = @src() });
             const box = try bw.row(.{ .src = @src() });
             defer bw.end(box);
             const innerbox = try bw.row(.{ .src = @src() });
@@ -153,7 +148,7 @@ const FrameData = struct {
                 const coords = std.fmt.bufPrintZ(&buf, "({[x]d},{[y]d})", pointer.pos) catch unreachable;
                 try bw.text(coords, .{ .src = @src() });
             } else {
-                try bw.text("Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.", .{ .src = @src() });
+                try bw.text("Pointer not in Surface", .{ .src = @src() });
             }
             const button = try bw.button("button", .{ .src = @src() });
             if (button.clicked) log.debug("Button Clicked", .{});

@@ -1,18 +1,24 @@
 //! A wrapper around cairo
 const std = @import("std");
 const pi = std.math.pi;
-const style = @import("./style.zig");
+const common = @import("./common.zig");
+const style = common.style;
+const Rect = common.Rect;
 const Color = style.Color;
 
-const c = @cImport({
-    @cInclude("cairo/cairo.h");
-});
+const c = common.c;
 
 pub const Context = opaque {
     extern fn cairo_create(surface: *Surface) *Context;
     pub const create = cairo_create;
 
-    extern fn cairo_scale(self: *const Context, sx: f64, sy: f64) void;
+    extern fn cairo_save(self: *Context) void;
+    pub const save = cairo_save;
+
+    extern fn cairo_restore(self: *Context) void;
+    pub const restore = cairo_restore;
+
+    extern fn cairo_scale(self: *Context, sx: f64, sy: f64) void;
     pub const scale = cairo_scale;
 
     // pub fn setSource(self: *Context, pattern: *Pattern) void {
@@ -33,11 +39,20 @@ pub const Context = opaque {
     extern fn cairo_stroke(self: *Context) void;
     pub const stroke = cairo_stroke;
 
+    extern fn cairo_stroke_preserve(self: *Context) void;
+    pub const strokePreserve = cairo_stroke_preserve;
+
     extern fn cairo_close_path(self: *Context) void;
     pub const closePath = cairo_close_path;
 
     extern fn cairo_paint(self: *Context) void;
     pub const paint = cairo_paint;
+
+    extern fn cairo_fill(self: *Context) void;
+    pub const fill = cairo_fill;
+
+    extern fn cairo_fill_preserve(self: *Context) void;
+    pub const fillPreserve = cairo_fill_preserve;
 
     extern fn cairo_select_font_face(self: *Context, family: [*:0]const u8, slant: Slant, weight: Weight) void;
     pub const selectFontFace = cairo_select_font_face;
@@ -57,19 +72,18 @@ pub const Context = opaque {
     extern fn cairo_arc(self: *Context, xc: f64, yc: f64, radius: f64, angle1: f64, angle2: f64) void;
     pub const arc = cairo_arc;
 
-    pub fn roundRect(self: *Context, x: f64, y: f64, width: f64, height: f64, radius: f64) void {
+    /// draw a rectangle with rounded borders and preserve path
+    pub fn roundRect(self: *Context, rect: Rect, radius: f64) void {
         const halfPi = pi / 2.0;
-        self.moveTo(x, y + radius);
-        self.arc(x + radius, y + radius, radius, 2 * halfPi, 3 * halfPi);
-        self.arc(x + width - radius, y + radius, radius, 3 * halfPi, 4 * halfPi);
-        self.arc(x + width - radius, y + height - radius, radius, 0 * halfPi, 1 * halfPi);
-        self.arc(x + radius, y + height - radius, radius, 1 * halfPi, 2 * halfPi);
+        self.moveTo(rect.x, rect.y + radius);
+        self.arc(rect.x + radius, rect.y + radius, radius, 2 * halfPi, 3 * halfPi);
+        self.arc(rect.x + rect.w - radius, rect.y + radius, radius, 3 * halfPi, 4 * halfPi);
+        self.arc(rect.x + rect.w - radius, rect.y + rect.h - radius, radius, 0 * halfPi, 1 * halfPi);
+        self.arc(rect.x + radius, rect.y + rect.h - radius, radius, 1 * halfPi, 2 * halfPi);
         self.closePath();
-        self.stroke();
     }
-    pub fn setSourceColor(self: *Context, color_any: anytype) !void {
+    pub fn setSourceColor(self: *Context, color: Color) void {
         // Note: this does NOT check all cases, just some more common ones
-        const color = try Color.fromAny(color_any);
         const max_u8: f32 = @floatFromInt(std.math.maxInt(u8));
         self.setSourceRgba(
             @as(f32, @floatFromInt(color.r)) / max_u8,
@@ -96,11 +110,11 @@ pub const Surface = opaque {
     extern fn cairo_surface_status(self: *Surface) Status;
     pub const status = cairo_surface_status;
 
-    extern fn cairo_image_surface_get_width(self: *Surface) i32;
+    extern fn cairo_image_surface_get_width(self: *const Surface) i32;
     pub const getWidth = cairo_image_surface_get_width;
 
-    extern fn cairo_image_surface_get_height(self: *Surface) i32;
-    pub const getHeight = cairo_image_surface_get_width;
+    extern fn cairo_image_surface_get_height(self: *const Surface) i32;
+    pub const getHeight = cairo_image_surface_get_height;
 
     // pub fn createFromPngCheck(path: [*:0]const u8) Status!*Surface {
     //     const surface = createFromPng(path);
