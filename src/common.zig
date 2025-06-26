@@ -90,34 +90,48 @@ pub const IdGenerator = struct {
     src: ?SourceLocation = null,
     extra: ?u32 = null,
     id: ?u32 = null,
+    /// Generally set by a widget creator so avoid using in high level calls.
+    /// If other fields are set, we will avoid using this as part of seed.
+    ptr: ?*anyopaque = null,
+    /// Generally set by a widget creator so avoid using in high level calls.
+    /// If other fields are set, we will avoid using this as part of seed.
+    str: ?[]const u8 = null,
+
     // note: we are not using std.hash.uint32 because of problems with 0
-    pub fn hash_u32(input: u32) u32 {
+    const hash = std.hash.CityHash32.hash;
+    pub fn hash_any(input: anytype) u32 {
         var ret: []const u8 = undefined;
         ret.ptr = @ptrCast(&input);
-        ret.len = 4;
-        return std.hash.CityHash32.hash(ret);
+        ret.len = @sizeOf(@TypeOf(input));
+        return hash(ret);
     }
     fn idFromSourceLocation(location: SourceLocation) u32 {
-        return hash_u32(location.line) ^ hash_u32(location.column);
-    }
-    pub fn addExtra(self: @This(), input: u32) @This() {
-        const input_hash = hash_u32(input);
-        return @This(){
-            .src = self.src,
-            .extra = if (self.extra) |prev| hash_u32(prev) ^ input_hash else hash_u32(input_hash),
-            .id = self.id,
-        };
+        return hash_any(location.line) ^ hash_any(location.column);
     }
     pub fn toId(self: @This()) u32 {
         if (self.id) |id| {
             return id;
         } else {
             const component_location = if (self.src) |loc| idFromSourceLocation(loc) else 0;
-            const component_extra = if (self.extra) |extra| hash_u32(extra) else 0;
-            const id = component_location ^ component_extra;
+            const component_extra = if (self.extra) |extra| hash_any(extra) else 0;
+            var id = component_location ^ component_extra;
             // assert(id != 0);
+            if (id == 0) {
+                const component_ptr = if (self.ptr) |ptr| hash_any(ptr) else 0;
+                const component_str = if (self.str) |str| hash(str) else 0;
+                id = component_ptr ^ component_str;
+            }
             return id;
         }
+    }
+
+    pub fn addExtra(self: @This(), input: u32) @This() {
+        const input_hash = hash_any(input);
+        return @This(){
+            .src = self.src,
+            .extra = if (self.extra) |prev| hash_any(prev) ^ input_hash else hash_any(input_hash),
+            .id = self.id,
+        };
     }
 };
 

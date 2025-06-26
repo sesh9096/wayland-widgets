@@ -117,12 +117,12 @@ pub fn addRepeatTask(self: *Self, task: Task, interval: u32) !void {
     return self.addRepeatTaskStartingAt(task, interval, timestamp());
 }
 
-pub const secondInterval = 1;
-pub const fiveSecondInterval = 5 * secondInterval;
-pub const minuteInterval = 60 * secondInterval;
-pub const fiveMinuteInterval = 5 * minuteInterval;
-pub const hourInterval = 60 * minuteInterval;
-pub const dayInterval = 24 * hourInterval;
+pub const second = 1000;
+pub const five_seconds = 5 * second;
+pub const minute = 60 * second;
+pub const five_minutes = 5 * minute;
+pub const hour = 60 * minute;
+pub const day = 24 * hour;
 
 // Testing
 
@@ -150,11 +150,10 @@ test "scheduler immediate" {
     var tracker: i32 = 0;
     const next_time = timestamp() + 5;
     try scheduler.addImmediateTask(.{ .call = @ptrCast(&exampleTask), .data = @ptrCast(&tracker) });
-    try scheduler.addJob(Job{ .time = next_time, .task = Task.create(
-        i32,
-        &tracker,
-        exampleTask,
-    ) });
+    try scheduler.addJob(Job{
+        .time = next_time,
+        .task = Task.create(*i32, exampleTask, &tracker),
+    });
     if (scheduler.runPendingGetNextTime()) |next_time_returned| {
         if (next_time != next_time_returned) {
             return error.IncorrectNextTime;
