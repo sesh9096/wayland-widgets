@@ -72,10 +72,11 @@ pub const StyleItem = union(enum) {
     border_color: Color,
     accent_color: Color,
 
-    defualt_font: *const Font,
+    default_font: *const Font,
     variable_font: *const Font,
 
     theme: *const Theme,
+    pub const Tag = std.meta.Tag(StyleItem);
 };
 
 /// Setting all styles at once, can be the base of a Style chain
@@ -93,9 +94,12 @@ pub const Theme = struct {
     default_font: *const Font,
     variable_font: ?*const Font = null,
 
-    pub fn getAttribute(self: Theme, attribute: anytype) std.meta.TagPayload(StyleItem, attribute) {
+    pub fn getAttribute(self: Theme, comptime attribute: StyleItem.Tag) std.meta.TagPayload(StyleItem, attribute) {
         const tag: std.meta.Tag(StyleItem) = attribute;
-        return @field(self, @tagName(tag));
+        return switch (tag) {
+            .variable_font => if (self.variable_font) |font| font else self.default_font,
+            else => @field(self, @tagName(tag)),
+        };
     }
 };
 
@@ -105,7 +109,7 @@ pub const Styles = struct {
     parent: ?*Styles,
     items: []const StyleItem,
     /// draw border and background and return the new size of the rect
-    pub fn getAttribute(self: *const Styles, attribute: anytype, fallback: ?*const Styles) std.meta.TagPayload(StyleItem, attribute) {
+    pub fn getAttribute(self: *const Styles, comptime attribute: StyleItem.Tag, fallback: ?*const Styles) std.meta.TagPayload(StyleItem, attribute) {
         if (self.getAttributeNullable(attribute)) |attr| {
             return attr;
         } else if (self != fallback and fallback != null) {
@@ -116,7 +120,7 @@ pub const Styles = struct {
         log.warn("Fallback is null or has no attribute " ++ @tagName(attribute) ++ ", looking in default theme", .{});
         return default_theme.getAttribute(attribute);
     }
-    pub fn getAttributeNullable(self: *const Styles, attribute: anytype) ?std.meta.TagPayload(StyleItem, attribute) {
+    pub fn getAttributeNullable(self: *const Styles, comptime attribute: StyleItem.Tag) ?std.meta.TagPayload(StyleItem, attribute) {
         for (self.items) |style| {
             if (style == attribute) {
                 return @field(style, @tagName(attribute));

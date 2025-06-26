@@ -38,7 +38,9 @@ pub fn draw(widget: *Widget, surface: *Surface) !void {
 pub fn proposeSize(widget: *Widget, surface: *Surface) void {
     const label = widget.getInner(@This());
     const cr = surface.currentBuffer().cairo_context;
-    const font_description = surface.context.font.describe();
+    const style = if (widget.styles) |style| style else surface.styles;
+    const fallback = if (widget.styles) |_| surface.styles else null;
+    const font_description = style.getAttribute(.default_font, fallback).describe();
     const layout = pango.PangoCairo.createLayout(cr);
     layout.setFontDescription(font_description);
     const text = label.text;

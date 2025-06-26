@@ -69,7 +69,7 @@ pub const FontDescription = opaque {
 };
 
 pub const Font = opaque {
-    extern fn pango_font_describe(self: *Font) *FontDescription;
+    extern fn pango_font_describe(self: *const Font) *FontDescription;
     pub const describe = pango_font_describe;
 };
 

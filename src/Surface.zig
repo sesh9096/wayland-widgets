@@ -207,13 +207,27 @@ pub fn end(self: *Self, widget: *Widget) void {
     }
 }
 
-/// attempt to add child
-fn addChildToCurrentWidget(self: *Self, widget: *Widget) !void {
-    widget.parent = self.widget;
+/// Add widget as a child of the current widget.
+/// Use this if the widget will have no children and subsequent widgets should be added to the parent.
+pub fn addWidget(self: *const Self, widget: *Widget) !void {
     if (self.widget) |parent| {
+        widget.parent = parent;
         try parent.vtable.addChild(parent, widget);
+    } else {
+        widget.parent = null;
     }
 }
+/// Add widget as a child of the current widget and then make it the current widget.
+/// Use this if you wish to add children to the widget.
+pub fn addWidgetSetCurrent(self: *const Self, widget: *Widget) !void {
+    try self.addWidget(widget);
+    self.setCurrent(widget);
+}
+
+pub fn setCurrent(self: *const Self, widget: *Widget) void {
+    self.widget = widget;
+}
+
 pub fn getWidget(self: *Self, id_gen: common.IdGenerator, T: type) !*Widget {
     const id = id_gen.toId();
     const get_or_put_res = try self.widget_storage.getOrPut(id);

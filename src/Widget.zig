@@ -89,3 +89,9 @@ pub fn drawDecorationAdjustSize(widget: *Widget, surface: *Surface) Rect {
     cr.fill();
     return rect.subtractSpacing(padding, padding);
 }
+
+/// call widget.vtable.draw on widget
+pub fn draw(widget: *Widget, surface: *Surface, bounding_box: Rect) anyerror!void {
+    widget.rect = bounding_box;
+    try widget.vtable.draw(widget, surface);
+}

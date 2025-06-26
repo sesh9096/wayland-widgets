@@ -20,8 +20,7 @@ fn draw(widget: *Widget, surface: *Surface) !void {
     // const cr = surface.getCairoContext();
     const rect = widget.drawDecorationAdjustSize(surface);
     if (widget.getInner(@This()).child) |child| {
-        child.rect = rect;
-        try child.vtable.draw(child, surface);
+        try child.draw(surface, rect);
     }
 }
 pub fn addChild(widget: *Widget, child: *Widget) !void {

@@ -15,7 +15,9 @@ pub fn configure(self: *@This(), text: [:0]const u8) void {
 pub fn draw(widget: *Widget, surface: *Surface) !void {
     const cr = surface.getCairoContext();
     const bounding_box = widget.drawDecorationAdjustSize(surface);
-    const font_description = surface.context.font.describe();
+    const style = if (widget.styles) |style| style else surface.styles;
+    const fallback = if (widget.styles) |_| surface.styles else null;
+    const font_description = style.getAttribute(.variable_font, fallback).describe();
     const layout = pango.PangoCairo.createLayout(cr);
     defer layout.free();
     layout.setFontDescription(font_description);

@@ -18,6 +18,7 @@ const Rect = common.Rect;
 const Point = common.Point;
 const KeyState = common.KeyState;
 const pango = common.pango;
+const style = common.style;
 const c = @cImport({
     @cInclude("linux/input-event-codes.h");
 });
@@ -33,7 +34,6 @@ outputs: OutputList,
 allocator: Allocator,
 font_map: *pango.FontMap,
 pango_context: *pango.Context,
-font: *pango.Font,
 
 const Context = @This();
 pub fn init(allocator: Allocator) !@This() {
@@ -43,6 +43,12 @@ pub fn init(allocator: Allocator) !@This() {
     const font_description = pango.FontDescription.fromString("monospace");
     font_description.setAbsoluteSize(pango.SCALE * 11);
     defer font_description.free();
+    style.default_theme.default_font = font_map.loadFont(pango_context, font_description);
+
+    const variable_font_description = pango.FontDescription.fromString("sans-serif");
+    variable_font_description.setAbsoluteSize(pango.SCALE * 11);
+    defer variable_font_description.free();
+    style.default_theme.variable_font = font_map.loadFont(pango_context, variable_font_description);
     return @This(){
         .allocator = allocator,
         .display = try wl.Display.connect(null),
@@ -51,7 +57,6 @@ pub fn init(allocator: Allocator) !@This() {
         .seat = .{ .wl_seat = undefined, .surfaces = Seat.Surfaces.init(allocator) },
         .font_map = font_map,
         .pango_context = pango_context,
-        .font = font_map.loadFont(pango_context, font_description),
     };
 }
 

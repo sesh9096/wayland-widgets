@@ -94,8 +94,7 @@ fn draw(widget: *Widget, surface: *Surface) !void {
                 const weight = 1;
                 rect.x = rect.x + rect.w;
                 rect.w = if (hexpand or child.rect.w == 0) scale * weight else child.rect.w;
-                child.rect = rect;
-                try child.vtable.draw(child, surface);
+                try child.draw(surface, rect);
             }
         },
         .up => {},
@@ -116,8 +115,7 @@ fn draw(widget: *Widget, surface: *Surface) !void {
                 const weight = 1;
                 rect.y = rect.y + rect.h;
                 rect.h = if (vexpand or child.rect.h == 0) scale * weight else child.rect.h;
-                child.rect = rect;
-                try child.vtable.draw(child, surface);
+                try child.draw(surface, rect);
             }
         },
     }
