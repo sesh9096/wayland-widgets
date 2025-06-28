@@ -26,3 +26,11 @@ To create a surface:
 2. Reset Widgets in Surface
 3. Create widgets
 4. Draw to Surface
+** On Id's
+Id's are used to uniquely identify widgets in a surface for purposes of handling input.
+They are created by hashing several times of data as specified by =IdGenerator=.
+
+almost all fields in IdGenerator are optional and used as follows:
+1. if =id= is set, use it *directly*
+2. if =src= or =extra= are set, use these and type data as hash
+3. otherwise, use =type=, =parent=, =ptr=, =string=, as hash, these should not be set directly by the user

@@ -87,9 +87,15 @@ pub const IRect = extern struct {
 
 /// Config for generating Id's, use `.id` for direct control or `.src` and optionally `.extra`
 pub const IdGenerator = struct {
+    id: ?u32 = null,
     src: ?SourceLocation = null,
     extra: ?u32 = null,
-    id: ?u32 = null,
+
+    /// Generally set by a widget creator so avoid using in high level calls.
+    type: ?type = null,
+    /// Generally set by a widget creator so avoid using in high level calls.
+    /// If other fields are set, we will avoid using this as part of seed.
+    parent: ?*u32 = null,
     /// Generally set by a widget creator so avoid using in high level calls.
     /// If other fields are set, we will avoid using this as part of seed.
     ptr: ?*anyopaque = null,
@@ -117,11 +123,13 @@ pub const IdGenerator = struct {
             var id = component_location ^ component_extra;
             // assert(id != 0);
             if (id == 0) {
+                const component_parent = if (self.parent) |parent| hash_any(parent) else 0;
                 const component_ptr = if (self.ptr) |ptr| hash_any(ptr) else 0;
                 const component_str = if (self.str) |str| hash(str) else 0;
-                id = component_ptr ^ component_str;
+                id = component_parent ^ component_ptr ^ component_str;
             }
-            return id;
+            const component_type = if (self.type) |T| hash(T) else 0;
+            return id ^ component_type;
         }
     }
 
