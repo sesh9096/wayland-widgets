@@ -15,6 +15,7 @@ pub const StatusWidgets = @import("./StatusWidgets.zig");
 pub const Seat = Context.Seat;
 pub const Windows = std.ArrayList(Window);
 const c = common.c;
+const FileNotifier = common.FileNotifier;
 
 const Options = struct {
     filename: ?[:0]const u8 = null,
@@ -56,15 +57,24 @@ pub fn main() !void {
     var surface = try output.initLayerSurface(&context, window);
     try surface.setListeners();
     if (context.display.dispatch() != .SUCCESS) return error.DispatchFailed;
-    const bw = BasicWidgets{ .surface = &surface };
 
     const scheduler = &context.scheduler;
+    var file_notifier = try FileNotifier.init(allocator);
+    defer file_notifier.close();
 
     try scheduler.addRepeatTask(Task.create(*Surface, markDirty, &surface), 1000);
+    var sw: StatusWidgets = undefined;
+    try sw.configure(&surface, scheduler, &file_notifier);
+
     var pollfds = [_]std.posix.pollfd{
         .{
             .events = std.posix.POLL.IN,
             .fd = context.displayFd(),
+            .revents = 0,
+        },
+        .{
+            .events = std.posix.POLL.IN,
+            .fd = file_notifier.fd,
             .revents = 0,
         },
     };
@@ -73,7 +83,7 @@ pub fn main() !void {
         // log.debug("starting poll", .{});
         const timeout = context.scheduler.runPendingGetTimeInterval();
         if (surface.redraw) {
-            try frame(&bw);
+            try frame(&sw);
         }
         if (context.display.flush() != .SUCCESS) return error.DispatchFailed;
         // should we block indefinitely?
@@ -85,14 +95,23 @@ pub fn main() !void {
                 // events
                 // log.debug("Got input from {} fd's", .{num_events});
                 var num_events_remaining = num_events;
-                for (pollfds) |pollfd| {
-                    if (pollfd.revents != 0) {
-                        num_events_remaining -= 1;
-                        // something happened!
-                        // log.debug("got events 0x{x}", .{pollfd.revents});
-                        if (context.display.dispatch() != .SUCCESS) return error.DispatchFailed;
-                        if (num_events_remaining == 0) break;
-                    }
+                // for (pollfds) |pollfd| {
+                //     if (pollfd.revents != 0) {
+                //         num_events_remaining -= 1;
+                //         // something happened!
+                //         // log.debug("got events 0x{x}", .{pollfd.revents});
+                //         if (context.display.dispatch() != .SUCCESS) return error.DispatchFailed;
+                //         if (num_events_remaining == 0) break;
+                //     }
+                // }
+                if (pollfds[0].revents != 0) {
+                    num_events_remaining -= 1;
+                    if (context.display.dispatch() != .SUCCESS) return error.DispatchFailed;
+                }
+                if (pollfds[1].revents != 0) {
+                    num_events_remaining -= 1;
+                    log.debug("got inotify events 0x{x}", .{pollfds[1].revents});
+                    try file_notifier.readEvents();
                 }
                 assert(num_events_remaining == 0);
             },
@@ -100,8 +119,11 @@ pub fn main() !void {
     }
 }
 
-pub fn frame(bw: *const BasicWidgets) !void {
+pub fn frame(sw: *StatusWidgets) !void {
     var buf: [64]u8 = undefined;
+    var buf2: [64]u8 = undefined;
+    var buf3: [64]u8 = undefined;
+    const bw = sw.bw;
     const s = bw.surface;
     s.beginFrame();
     defer s.endFrame();
@@ -109,21 +131,22 @@ pub fn frame(bw: *const BasicWidgets) !void {
         const overlay = try bw.overlay(.{ .src = @src() });
         defer bw.end(overlay);
         try bw.image("/home/ss/pictures/draw/experiment.png", .stretch, .{ .src = @src() });
-        const box = try bw.row(.{ .src = @src() });
-        defer bw.end(box);
+        const main_layout = try bw.column(.{ .src = @src() });
+        defer bw.end(main_layout);
         const innerbox = try bw.row(.{ .src = @src() });
         bw.end(innerbox);
+        {
+            const box = try bw.row(.{ .src = @src() });
+            defer bw.end(box);
+            try sw.time("%I:%M %p %a %b %d,%Y", &buf, .{ .src = @src() });
+            try sw.battery(" {percentage}% {status}", &buf2, .{ .src = @src() });
+            try sw.disk("/home", "{used_bytes} {free_bytes} {total_bytes}", &buf3, .{ .src = @src() });
+        }
         const innerbox1 = try bw.row(.{ .src = @src() });
         bw.end(innerbox1);
-        const innerbox2 = try bw.column(.{ .src = @src() });
-        defer bw.end(innerbox2);
-        const innerbox3 = try bw.column(.{ .src = @src() });
-        bw.end(innerbox3);
-        const innerbox4 = try bw.row(.{ .src = @src() });
-        bw.end(innerbox4);
         try bw.text("Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.", .{ .src = @src() });
         if (s.getPointer()) |pointer| {
-            const coords = std.fmt.bufPrintZ(&buf, "({[x]d},{[y]d})", pointer.pos) catch unreachable;
+            const coords = std.fmt.bufPrintZ(&buf, "({[x]d:.2},{[y]d:.2})", pointer.pos) catch unreachable;
             try bw.text(coords, .{ .src = @src() });
         } else {
             try bw.text("Pointer not in Surface", .{ .src = @src() });
