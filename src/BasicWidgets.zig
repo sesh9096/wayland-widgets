@@ -52,7 +52,7 @@ pub inline fn setCurrent(self: *const Self, widget: *Widget) void {
     self.surface.widget = widget;
 }
 
-pub fn getWidget(self: *const Self, id_gen: common.IdGenerator, T: type) !*Widget {
+pub fn getWidget(self: *const Self, id_gen: IdGenerator, T: type) !*Widget {
     return self.surface.getWidget(id_gen, T);
 }
 
@@ -64,7 +64,10 @@ pub fn end(self: *const Self, widget: *Widget) void {
 }
 
 pub fn getBox(self: *const Self, direction: Direction, expand: Expand, id_gen: IdGenerator) !*Widget {
-    const widget = try self.getWidget(id_gen, Box);
+    const widget = try self.getWidget(id_gen.add(.{
+        .type_name = @typeName(Box),
+        .parent = self.surface.widget,
+    }), Box);
     widget.getInner(Box).configure(direction, expand);
 
     // const widget = try Box.widget(self.allocator, direction);
@@ -83,7 +86,10 @@ pub fn column(self: *const Self, id_gen: IdGenerator) !*Widget {
 }
 
 pub fn getOverlay(self: *const Self, id_gen: IdGenerator) !*Widget {
-    const widget = try self.getWidget(id_gen, Overlay);
+    const widget = try self.getWidget(id_gen.add(.{
+        .type_name = @typeName(Overlay),
+        .parent = self.surface.widget,
+    }), Overlay);
     widget.getInner(Overlay).configure();
     return widget;
 }
@@ -99,7 +105,11 @@ pub fn getImage(self: *const Self, path: [:0]const u8, option: Image.Option, id_
         log.err("{}", .{image_surface.status()});
     }
 
-    const widget = try self.getWidget(id_gen, Image);
+    const widget = try self.getWidget(id_gen.add(.{
+        .type_name = @typeName(Image),
+        .parent = self.surface.widget,
+        .str = path,
+    }), Image);
     widget.getInner(Image).configure(image_surface, option);
     return widget;
 }

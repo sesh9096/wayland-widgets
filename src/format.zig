@@ -1,4 +1,5 @@
 const std = @import("std");
+const log = std.log;
 // pub fn Formatter(T: type) type {
 //     return struct {};
 // }
@@ -7,10 +8,20 @@ const std = @import("std");
 
 pub const State = enum { str, field };
 pub fn format(s: anytype, fmt: []const u8, writer: anytype) !void {
-    const T = @TypeOf(s);
+    const type_info_s = @typeInfo(@TypeOf(s));
+    const T = if (type_info_s == .Struct) @TypeOf(s) else if (type_info_s == .Pointer) blk: {
+        const U = type_info_s.Pointer.child;
+        if (@typeInfo(U) == .Struct) {
+            break :blk U;
+        } else {
+            @compileError("Expected struct or pointer to struct, got " ++ @typeName(@TypeOf(s)));
+        }
+    } else {
+        @compileError("Expected struct or pointer to struct, got " ++ @typeName(@TypeOf(s)));
+    };
     const type_info = @typeInfo(T);
-    if (type_info != .Struct) @compileError("Expected struct, got " ++ @typeName(T));
     const fields = type_info.Struct.fields;
+    const decls = type_info.Struct.decls;
 
     var state = State.str;
     var start: u64 = 0;
@@ -43,8 +54,24 @@ pub fn format(s: anytype, fmt: []const u8, writer: anytype) !void {
                         break;
                     }
                 } else {
-                    // possibly check decls?
-                    return error.BadFormat;
+                    inline for (decls) |decl| {
+                        if (std.mem.eql(u8, decl.name, specifier)) {
+                            // try writer.print("{}", .{@field(s, field.name)});
+                            const field = @field(T, decl.name);
+                            switch (@typeInfo(@TypeOf(field))) {
+                                .Fn => |data| {
+                                    const params = data.params;
+                                    if (params.len == 2 and params[0].type == T and params[1].is_generic) {
+                                        try field(s, writer);
+                                    }
+                                },
+                                else => return error.BadFormat,
+                            }
+                            break;
+                        }
+                    } else {
+                        return error.BadFormat;
+                    }
                 }
             },
             else => {},
@@ -56,6 +83,11 @@ pub fn format(s: anytype, fmt: []const u8, writer: anytype) !void {
 pub fn formatToBuffer(s: anytype, fmt: []const u8, buffer: []u8) ![]u8 {
     var stream = std.io.fixedBufferStream(buffer);
     const writer = stream.writer();
+    try format(s, fmt, writer);
+    return buffer[0..stream.pos];
+}
+pub fn formatToArrayList(s: anytype, fmt: []const u8, array_list: *std.ArrayList(u8)) ![]u8 {
+    const writer = array_list.writer();
     try format(s, fmt, writer);
     return buffer[0..stream.pos];
 }

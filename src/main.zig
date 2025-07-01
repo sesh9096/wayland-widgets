@@ -62,7 +62,7 @@ pub fn main() !void {
     var file_notifier = try FileNotifier.init(allocator);
     defer file_notifier.close();
 
-    try scheduler.addRepeatTask(Task.create(*Surface, markDirty, &surface), 1000);
+    try scheduler.addRepeatTask(Task.create(&surface, markDirty), 1000);
     var sw: StatusWidgets = undefined;
     try sw.configure(&surface, scheduler, &file_notifier);
 
@@ -123,6 +123,7 @@ pub fn frame(sw: *StatusWidgets) !void {
     var buf: [64]u8 = undefined;
     var buf2: [64]u8 = undefined;
     var buf3: [64]u8 = undefined;
+    var buf4: [64]u8 = undefined;
     const bw = sw.bw;
     const s = bw.surface;
     s.beginFrame();
@@ -140,7 +141,8 @@ pub fn frame(sw: *StatusWidgets) !void {
             defer bw.end(box);
             try sw.time("%I:%M %p %a %b %d,%Y", &buf, .{ .src = @src() });
             try sw.battery(" {percentage}% {status}", &buf2, .{ .src = @src() });
-            try sw.disk("/home", "{used_bytes} {free_bytes} {total_bytes}", &buf3, .{ .src = @src() });
+            try sw.disk("/home/ss", "{used} {free} {total}", &buf3, .{ .src = @src() });
+            try sw.mem("{MemTotal} {SwapTotal}", &buf4, .{ .src = @src() });
         }
         const innerbox1 = try bw.row(.{ .src = @src() });
         bw.end(innerbox1);

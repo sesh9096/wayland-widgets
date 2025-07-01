@@ -64,7 +64,7 @@ pub fn configure(self: *Self, surface: *Surface, scheduler: *Scheduler, file_not
         }
         // default = Self{ .capacity_file = try battery_dir.open("capacity") };
     }
-    try scheduler.addRepeatTask(Task.create(*Self, updateBatteries, self), Scheduler.five_seconds);
+    try scheduler.addRepeatTask(Task.create(self, updateBatteries), Scheduler.five_seconds);
 }
 pub fn updateBatteries(self: *Self) void {
     for (self.batteries.items) |*bat| {
@@ -167,6 +167,53 @@ pub fn battery(self: *Self, fmt: [:0]const u8, buffer: []u8, id_gen: IdGenerator
 }
 
 // /proc/meminfo /proc/swaps
+pub const MemInfo = struct {
+    MemTotal: u64 = 0,
+    MemFree: u64 = 0,
+    MemAvailable: u64 = 0,
+    SwapTotal: u64 = 0,
+    SwapFree: u64 = 0,
+
+    var meminfo_file = File{ .handle = -1 };
+    pub fn update(self: *MemInfo) !void {
+        if (meminfo_file.handle == -1) {
+            meminfo_file = try std.fs.openFileAbsolute("/proc/meminfo", .{});
+        }
+        try meminfo_file.seekTo(0);
+        const base_reader = meminfo_file.reader();
+        var br = std.io.bufferedReader(base_reader);
+        const reader = br.reader();
+        const fields = @typeInfo(MemInfo).Struct.fields;
+        var fields_remaining = fields.len; // we have 5 fields we want to read, change if we ever get more fields
+        outer: while (true) {
+            var buf: [32]u8 = undefined;
+            const line = try reader.readUntilDelimiter(&buf, '\n');
+            const index = std.mem.indexOfScalar(u8, line, ':').?;
+            inline for (fields) |field| {
+                if (std.mem.eql(u8, line[0..index], field.name)) {
+                    const size = try std.fmt.parseInt(u64, std.mem.trim(u8, line[index + 1 .. line.len - 3], " "), 10);
+                    @field(self, field.name) = size;
+                    fields_remaining -= 1;
+                    if (fields_remaining == 0) {
+                        break :outer;
+                    }
+                }
+            }
+        }
+    }
+};
+pub var meminfo = MemInfo{};
+
+pub fn getMem(self: *Self, fmt: [:0]const u8, buffer: []u8, id_gen: IdGenerator) !*Widget {
+    try meminfo.update();
+    const text = try format.formatToBuffer(meminfo, fmt, buffer);
+    buffer[text.len] = 0;
+    return self.bw.getLabel(@ptrCast(text), id_gen);
+}
+pub fn mem(self: *Self, fmt: [:0]const u8, buffer: []u8, id_gen: IdGenerator) !void {
+    const widget = try self.getMem(fmt, buffer, id_gen);
+    try self.surface.addWidget(widget);
+}
 
 pub fn getDisk(self: *Self, path: [*:0]const u8, fmt: [:0]const u8, buffer: []u8, id_gen: IdGenerator) !*Widget {
     var stats: Statvfs = undefined;
@@ -193,7 +240,39 @@ pub const Disk = struct {
     total_bytes: u64,
     used_bytes: u64,
     free_bytes: u64,
+
+    pub fn free(self: Disk, writer: anytype) !void {
+        return writeSize(self.free_bytes, writer);
+    }
+    pub fn used(self: Disk, writer: anytype) !void {
+        return writeSize(self.used_bytes, writer);
+    }
+    pub fn total(self: Disk, writer: anytype) !void {
+        return writeSize(self.total_bytes, writer);
+    }
 };
+
+fn writeSize(size: u64, writer: anytype) !void {
+    assert(size != 0);
+    const log2: u6 = @intCast(64 - 1 - @clz(size));
+    const log1024 = log2 / 10;
+    const unit: u8 = switch (log1024) {
+        0 => 'B',
+        1 => 'K',
+        2 => 'M',
+        3 => 'G',
+        4 => 'T',
+        5 => 'P',
+        6 => 'E',
+        // 7 => 'Z',
+        // 8 => 'Y',
+        // 9 => 'R',
+        // 10 => 'Q',
+        else => unreachable, // math has gone wrong
+    };
+    const size_in_units = @as(f32, @floatFromInt(size)) / @as(f32, @floatFromInt(@as(u64, 1) << (log1024 * 10)));
+    return writer.print("{d:.2}{c}", .{ size_in_units, unit });
+}
 
 pub fn statvfsWithError(noalias pathname: [*:0]const u8, noalias buf: *Statvfs) !void {
     while (true) {

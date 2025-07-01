@@ -136,10 +136,10 @@ pub const IdGenerator = struct {
     extra: ?u32 = null,
 
     /// Generally set by a widget creator so avoid using in high level calls.
-    type: ?type = null,
+    type_name: ?[:0]const u8 = null,
     /// Generally set by a widget creator so avoid using in high level calls.
     /// If other fields are set, we will avoid using this as part of seed.
-    parent: ?*u32 = null,
+    parent: ?*Widget = null,
     /// Generally set by a widget creator so avoid using in high level calls.
     /// If other fields are set, we will avoid using this as part of seed.
     ptr: ?*anyopaque = null,
@@ -172,7 +172,7 @@ pub const IdGenerator = struct {
                 const component_str = if (self.str) |str| hash(str) else 0;
                 id = component_parent ^ component_ptr ^ component_str;
             }
-            const component_type = if (self.type) |T| hash(@typeName(T)) else 0;
+            const component_type = if (self.type_name) |T| hash(T) else 0;
             return id ^ component_type;
         }
     }
@@ -183,6 +183,18 @@ pub const IdGenerator = struct {
             .src = self.src,
             .extra = if (self.extra) |prev| hash_any(prev) ^ input_hash else hash_any(input_hash),
             .id = self.id,
+        };
+    }
+
+    pub fn add(self: @This(), defaults: @This()) @This() {
+        return .{
+            .id = self.id orelse defaults.id,
+            .extra = self.extra orelse defaults.extra,
+            .src = self.src orelse defaults.src,
+            .type_name = self.type_name orelse defaults.type_name,
+            .parent = self.parent orelse defaults.parent,
+            .ptr = self.ptr orelse defaults.ptr,
+            .str = self.str orelse defaults.str,
         };
     }
 };

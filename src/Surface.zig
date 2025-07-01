@@ -172,9 +172,12 @@ pub fn getCairoContext(self: *Self) *cairo.Context {
 }
 
 pub fn beginFrame(self: *Self) void {
+    self.beginFrameRetained();
+    self.widget = null;
+}
+pub fn beginFrameRetained(self: *Self) void {
     // Check for inputs
     self.handleInputs();
-    self.widget = null;
 
     // Attach correct buffer
     if (!self.currentBuffer().usable) {

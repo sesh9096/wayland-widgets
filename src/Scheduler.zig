@@ -13,8 +13,9 @@ pub const Task = struct {
     /// parameter to job
     data: *anyopaque,
 
-    pub fn create(T: type, call: *const fn (data: T) void, data: T) Task {
+    pub fn create(data: anytype, call: *const fn (data: @TypeOf(data)) void) Task {
         // type check
+        const T = @TypeOf(data);
         _ = switch (@typeInfo(T)) {
             .Pointer => |pointer| {
                 if (pointer.size != .One) @compileError("Single item Pointer Required, got " ++ @typeName(T));
@@ -152,7 +153,7 @@ test "scheduler immediate" {
     try scheduler.addImmediateTask(.{ .call = @ptrCast(&exampleTask), .data = @ptrCast(&tracker) });
     try scheduler.addJob(Job{
         .time = next_time,
-        .task = Task.create(*i32, exampleTask, &tracker),
+        .task = Task.create(&tracker, exampleTask),
     });
     if (scheduler.runPendingGetNextTime()) |next_time_returned| {
         if (next_time != next_time_returned) {

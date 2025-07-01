@@ -49,7 +49,8 @@ pub fn addWatch(self: *Self, pathname: []const u8, mask: u32, handler: Handler) 
 }
 
 pub fn readEvents(self: Self) !void {
-    const NotifyBuffer = extern struct { event: Event, name: [4096]u8 };
+    // TODO: FIXME
+    const NotifyBuffer = extern struct { event: Event, name: [4096 + 1]u8 };
     var buf: NotifyBuffer = undefined;
     while (try posix.read(self.fd, std.mem.asBytes(&buf)) != 0) {
         const event: *Event = @ptrCast(&buf);
