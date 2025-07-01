@@ -86,10 +86,9 @@ pub fn formatToBuffer(s: anytype, fmt: []const u8, buffer: []u8) ![]u8 {
     try format(s, fmt, writer);
     return buffer[0..stream.pos];
 }
-pub fn formatToArrayList(s: anytype, fmt: []const u8, array_list: *std.ArrayList(u8)) ![]u8 {
+pub fn formatToArrayList(s: anytype, fmt: []const u8, array_list: *std.ArrayList(u8)) !void {
     const writer = array_list.writer();
     try format(s, fmt, writer);
-    return buffer[0..stream.pos];
 }
 
 test "basic" {

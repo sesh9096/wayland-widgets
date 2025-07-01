@@ -222,7 +222,7 @@ test "identical id" {
 }
 
 test "different types" {
-    const id1 = IdGenerator.toId(.{ .type = IdGenerator });
-    const id2 = IdGenerator.toId(.{ .type = i32 });
+    const id1 = IdGenerator.toId(.{ .type_name = @typeName(IdGenerator) });
+    const id2 = IdGenerator.toId(.{ .type_name = @typeName(i32) });
     if (id1 == id2) return error.DuplicateId;
 }
