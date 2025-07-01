@@ -166,3 +166,7 @@ pub fn frame(sw: *StatusWidgets) !void {
 pub fn markDirty(surface: *Surface) void {
     surface.redraw = true;
 }
+
+test {
+    _ = common;
+}
