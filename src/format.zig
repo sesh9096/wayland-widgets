@@ -70,6 +70,7 @@ pub fn format(s: anytype, fmt: []const u8, writer: anytype) !void {
                             break;
                         }
                     } else {
+                        log.err("specifier \"{s}\" is invalid", .{specifier});
                         return error.BadFormat;
                     }
                 }

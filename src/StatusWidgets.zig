@@ -10,21 +10,22 @@ const common = @import("./common.zig");
 const format = common.format;
 const Surface = common.Surface;
 const Widget = common.Widget;
-const cairo = common.cairo;
-const pango = common.pango;
-const Rect = common.Rect;
 const c = common.c;
 const Scheduler = common.Scheduler;
 const Task = Scheduler.Task;
 const FileNotifier = common.FileNotifier;
 const IdGenerator = common.IdGenerator;
+const typeHash = common.typeHash;
 const BasicWidgets = @import("./BasicWidgets.zig");
 const IN = FileNotifier.IN;
+const CacheItem = std.ArrayList(u8);
+const Cache = std.AutoHashMap(u32, CacheItem);
 
 surface: *Surface,
 bw: BasicWidgets,
 scheduler: *Scheduler,
 file_notifier: *FileNotifier,
+cache: Cache, // persistent data accessed by Id
 
 timestamp: i64 = 0,
 batteries: BatteryList = undefined,
@@ -32,12 +33,13 @@ const BatteryList = std.ArrayList(Battery);
 
 const Self = @This();
 pub fn configure(self: *Self, surface: *Surface, scheduler: *Scheduler, file_notifier: *FileNotifier) !void {
+    const allocator = surface.allocator;
     self.surface = surface;
-    self.bw = BasicWidgets{ .surface = surface };
+    self.bw = BasicWidgets.init(surface);
     self.scheduler = scheduler;
     self.file_notifier = file_notifier;
-    const allocator = surface.allocator;
-    try scheduler.addRepeatTask(Task.create(*Self, updateTime, self), Scheduler.second);
+    self.cache = Cache.init(allocator);
+    try scheduler.addRepeatTask(Task.create(self, updateTime), Scheduler.second);
 
     self.batteries = BatteryList.init(allocator);
     if (Battery.power_supply_dir.fd == -1) { // this should not happen unless uninitialized
@@ -66,6 +68,25 @@ pub fn configure(self: *Self, surface: *Surface, scheduler: *Scheduler, file_not
     }
     try scheduler.addRepeatTask(Task.create(self, updateBatteries), Scheduler.five_seconds);
 }
+pub fn deinit(self: *Self) void {
+    self.cache.deinit();
+    self.bw.deinit();
+}
+fn getArrayList(self: *Self, id_gen: IdGenerator) !*CacheItem {
+    const id = id_gen.toId();
+    const get_or_put_res = try self.cache.getOrPut(id);
+    const ptr = get_or_put_res.value_ptr;
+    if (get_or_put_res.found_existing) {
+        return ptr;
+    } else {
+        // log.debug("Created {s} widget with id {}", .{ @typeName(T), id });
+        // guess an initial size to hopefully reduce number of allocations
+        ptr.* = CacheItem.init(self.surface.allocator);
+        try ptr.ensureTotalCapacity(16);
+        return ptr;
+    }
+}
+
 pub fn updateBatteries(self: *Self) void {
     for (self.batteries.items) |*bat| {
         if (Battery.power_supply_dir.access(bat.name, .{})) {
@@ -76,6 +97,7 @@ pub fn updateBatteries(self: *Self) void {
             log.warn("Battery {s} not accessible: {}", .{ bat.name, err });
         }
     }
+    self.surface.redraw = true;
 }
 fn logEvent(_: *anyopaque, event: *FileNotifier.Event) void {
     log.info("0x{x} {?s}", .{ event.mask, event.getName() });
@@ -93,21 +115,29 @@ fn batteryDeviceMonitor(self: *Self, event: *FileNotifier.Event) void {
     }
 }
 
-pub fn deinit(self: *Self) void {
-    _ = self;
-}
 pub fn updateTime(self: *Self) void {
     self.timestamp = std.time.timestamp();
+    self.surface.redraw = true;
 }
 
-pub fn getTime(self: *const Self, fmt: [:0]const u8, buffer: []u8, id_gen: IdGenerator) !*Widget {
+pub fn getTime(self: *Self, fmt: [:0]const u8, id_gen_base: IdGenerator) !*Widget {
+    const id_gen = id_gen_base.add(.{ .type_hash = typeHash(c.struct_tm), .str = fmt });
     const time_struct = c.localtime(&@intCast(self.timestamp));
-    const len = c.strftime(buffer.ptr, buffer.len, fmt, time_struct);
-    return self.bw.getLabel(@ptrCast(buffer[0..len]), id_gen);
+    while (true) {
+        var al = try self.getArrayList(id_gen);
+        const buffer = al.items.ptr[0..al.capacity];
+        const len = c.strftime(buffer.ptr, buffer.len, fmt, time_struct);
+        if (len == 0) {
+            try al.ensureTotalCapacity(3 * al.capacity / 2 + 8);
+        } else {
+            al.items.len = len;
+            return self.bw.getLabel(@ptrCast(buffer[0..len]), id_gen);
+        }
+    }
 }
 
-pub fn time(self: *const Self, fmt: [:0]const u8, buffer: []u8, id_gen: IdGenerator) !void {
-    const widget = try self.getTime(fmt, buffer, id_gen);
+pub fn time(self: *Self, fmt: [:0]const u8, id_gen: IdGenerator) !void {
+    const widget = try self.getTime(fmt, id_gen);
     try self.surface.addWidget(widget);
 }
 
@@ -148,7 +178,7 @@ pub const Battery = struct {
     }
 };
 
-pub fn getBattery(self: *Self, fmt: [:0]const u8, buffer: []u8, id_gen: IdGenerator) !*Widget {
+pub fn getBattery(self: *Self, fmt: [:0]const u8, id_gen_base: IdGenerator) !*Widget {
     // const capacity_file = try std.fs.openFileAbsolute("/sys/class/power_supply/BAT0/capacity", .{});
     const batteries = self.batteries.items;
     const bat = if (batteries.len > 0) batteries[0] else return error.BatteryNotFound;
@@ -156,17 +186,19 @@ pub fn getBattery(self: *Self, fmt: [:0]const u8, buffer: []u8, id_gen: IdGenera
     if (bat.status == .Unknown) {
         return error.BatteryNotFound;
     }
-    const battery_text = try format.formatToBuffer(bat, fmt, buffer);
-    buffer[battery_text.len] = 0;
-    return self.bw.getLabel(@ptrCast(battery_text), id_gen);
+    const id_gen = id_gen_base.add(.{ .type_hash = typeHash(Battery), .str = fmt });
+    var al = try self.getArrayList(id_gen);
+    try format.formatToArrayList(bat, fmt, al);
+    try al.append(0);
+    return self.bw.getLabel(@ptrCast(al.items), id_gen);
 }
 
-pub fn battery(self: *Self, fmt: [:0]const u8, buffer: []u8, id_gen: IdGenerator) !void {
-    const widget = try self.getBattery(fmt, buffer, id_gen);
+pub fn battery(self: *Self, fmt: [:0]const u8, id_gen: IdGenerator) !void {
+    const widget = try self.getBattery(fmt, id_gen);
     try self.surface.addWidget(widget);
 }
 
-// /proc/meminfo /proc/swaps
+/// /proc/meminfo information
 pub const MemInfo = struct {
     MemTotal: u64 = 0,
     MemFree: u64 = 0,
@@ -201,21 +233,38 @@ pub const MemInfo = struct {
             }
         }
     }
+
+    pub fn avail(self: MemInfo, writer: anytype) !void {
+        return writeSize(self.MemAvailable, writer);
+    }
+    pub fn used(self: MemInfo, writer: anytype) !void {
+        return writeSize(self.MemTotal - self.MemAvailable, writer);
+    }
+
+    pub fn swapAvail(self: MemInfo, writer: anytype) !void {
+        return writeSize(self.SwapFree, writer);
+    }
+    pub fn swapUsed(self: MemInfo, writer: anytype) !void {
+        return writeSize(self.SwapTotal - self.SwapFree, writer);
+    }
 };
 pub var meminfo = MemInfo{};
 
-pub fn getMem(self: *Self, fmt: [:0]const u8, buffer: []u8, id_gen: IdGenerator) !*Widget {
+pub fn getMem(self: *Self, fmt: [:0]const u8, id_gen_base: IdGenerator) !*Widget {
     try meminfo.update();
-    const text = try format.formatToBuffer(meminfo, fmt, buffer);
-    buffer[text.len] = 0;
-    return self.bw.getLabel(@ptrCast(text), id_gen);
+    const id_gen = id_gen_base.add(.{ .type_hash = typeHash(MemInfo), .str = fmt });
+    var al = try self.getArrayList(id_gen);
+    al.clearRetainingCapacity();
+    try format.formatToArrayList(meminfo, fmt, al);
+    try al.append(0);
+    return self.bw.getLabel(@ptrCast(al.items), id_gen);
 }
-pub fn mem(self: *Self, fmt: [:0]const u8, buffer: []u8, id_gen: IdGenerator) !void {
-    const widget = try self.getMem(fmt, buffer, id_gen);
+pub fn mem(self: *Self, fmt: [:0]const u8, id_gen: IdGenerator) !void {
+    const widget = try self.getMem(fmt, id_gen);
     try self.surface.addWidget(widget);
 }
 
-pub fn getDisk(self: *Self, path: [*:0]const u8, fmt: [:0]const u8, buffer: []u8, id_gen: IdGenerator) !*Widget {
+pub fn getDisk(self: *Self, path: [*:0]const u8, fmt: [:0]const u8, id_gen_base: IdGenerator) !*Widget {
     var stats: Statvfs = undefined;
     try statvfsWithError(path, &stats);
     const avail_size = stats.f_bsize * stats.f_bavail;
@@ -227,12 +276,15 @@ pub fn getDisk(self: *Self, path: [*:0]const u8, fmt: [:0]const u8, buffer: []u8
         .used_bytes = used_size,
         .free_bytes = avail_size,
     };
-    const text = try format.formatToBuffer(d, fmt, buffer);
-    buffer[text.len] = 0;
-    return self.bw.getLabel(@ptrCast(text), id_gen);
+    const id_gen = id_gen_base.add(.{ .type_hash = typeHash(Disk), .str = fmt });
+    var al = try self.getArrayList(id_gen);
+    al.clearRetainingCapacity();
+    try format.formatToArrayList(d, fmt, al);
+    try al.append(0);
+    return self.bw.getLabel(@ptrCast(al.items), id_gen);
 }
-pub fn disk(self: *Self, path: [*:0]const u8, fmt: [:0]const u8, buffer: []u8, id_gen: IdGenerator) !void {
-    const widget = try self.getDisk(path, fmt, buffer, id_gen);
+pub fn disk(self: *Self, path: [*:0]const u8, fmt: [:0]const u8, id_gen: IdGenerator) !void {
+    const widget = try self.getDisk(path, fmt, id_gen);
     try self.surface.addWidget(widget);
 }
 

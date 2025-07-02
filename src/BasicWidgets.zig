@@ -14,6 +14,8 @@ const Point = common.Point;
 const Direction = common.Direction;
 const Expand = common.Expand;
 const IdGenerator = common.IdGenerator;
+const typeHash = common.typeHash;
+const ImageCache = std.StringHashMap(*cairo.Surface);
 
 pub const Text = @import("./BasicWidgets/Text.zig");
 pub const Label = @import("./BasicWidgets/Label.zig");
@@ -21,14 +23,18 @@ pub const Button = @import("./BasicWidgets/Button.zig");
 pub const Box = @import("./BasicWidgets/Box.zig");
 
 surface: *Surface,
+image_cache: ImageCache,
 
 const Self = @This();
 pub fn init(surface: *Surface) Self {
-    return Self{ .surface = surface };
+    return Self{
+        .surface = surface,
+        .image_cache = ImageCache.init(surface.allocator),
+    };
 }
 
 pub fn deinit(self: *Self) void {
-    _ = self;
+    self.image_cache.deinit();
 }
 
 /// Add widget as a child of the current widget.
@@ -65,7 +71,7 @@ pub fn end(self: *const Self, widget: *Widget) void {
 
 pub fn getBox(self: *const Self, direction: Direction, expand: Expand, id_gen: IdGenerator) !*Widget {
     const widget = try self.getWidget(id_gen.add(.{
-        .type_name = @typeName(Box),
+        .type_hash = typeHash(Box),
         .parent = self.surface.widget,
     }), Box);
     widget.getInner(Box).configure(direction, expand);
@@ -87,7 +93,7 @@ pub fn column(self: *const Self, id_gen: IdGenerator) !*Widget {
 
 pub fn getOverlay(self: *const Self, id_gen: IdGenerator) !*Widget {
     const widget = try self.getWidget(id_gen.add(.{
-        .type_name = @typeName(Overlay),
+        .type_hash = typeHash(Overlay),
         .parent = self.surface.widget,
     }), Overlay);
     widget.getInner(Overlay).configure();
@@ -99,21 +105,26 @@ pub fn overlay(self: *const Self, id_gen: IdGenerator) !*Widget {
     return widget;
 }
 
-pub fn getImage(self: *const Self, path: [:0]const u8, option: Image.Option, id_gen: IdGenerator) !*Widget {
-    const image_surface = cairo.Surface.createFromPng(path);
-    if (image_surface.status() != .SUCCESS) {
-        log.err("{}", .{image_surface.status()});
-    }
+pub fn getImage(self: *Self, path: [:0]const u8, option: Image.Option, id_gen: IdGenerator) !*Widget {
+    const get_or_put_res = try self.image_cache.getOrPut(path);
+    const image_surface = if (get_or_put_res.found_existing) get_or_put_res.value_ptr.* else blk: {
+        const img = cairo.Surface.createFromPng(path);
+        if (img.status() != .SUCCESS) {
+            log.err("{}", .{img.status()});
+        }
+        get_or_put_res.value_ptr.* = img;
+        break :blk img;
+    };
 
     const widget = try self.getWidget(id_gen.add(.{
-        .type_name = @typeName(Image),
+        .type_hash = typeHash(Image),
         .parent = self.surface.widget,
         .str = path,
     }), Image);
     widget.getInner(Image).configure(image_surface, option);
     return widget;
 }
-pub fn image(self: *const Self, path: [:0]const u8, option: Image.Option, id_gen: IdGenerator) !void {
+pub fn image(self: *Self, path: [:0]const u8, option: Image.Option, id_gen: IdGenerator) !void {
     const widget = try self.getImage(path, option, id_gen);
     try self.addWidget(widget);
 }

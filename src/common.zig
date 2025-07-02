@@ -136,7 +136,7 @@ pub const IdGenerator = struct {
     extra: ?u32 = null,
 
     /// Generally set by a widget creator so avoid using in high level calls.
-    type_name: ?[:0]const u8 = null,
+    type_hash: ?u32 = null,
     /// Generally set by a widget creator so avoid using in high level calls.
     /// If other fields are set, we will avoid using this as part of seed.
     parent: ?*Widget = null,
@@ -172,7 +172,7 @@ pub const IdGenerator = struct {
                 const component_str = if (self.str) |str| hash(str) else 0;
                 id = component_parent ^ component_ptr ^ component_str;
             }
-            const component_type = if (self.type_name) |T| hash(T) else 0;
+            const component_type = self.type_hash orelse 0;
             return id ^ component_type;
         }
     }
@@ -191,13 +191,16 @@ pub const IdGenerator = struct {
             .id = self.id orelse defaults.id,
             .extra = self.extra orelse defaults.extra,
             .src = self.src orelse defaults.src,
-            .type_name = self.type_name orelse defaults.type_name,
+            .type_hash = self.type_hash orelse defaults.type_hash,
             .parent = self.parent orelse defaults.parent,
             .ptr = self.ptr orelse defaults.ptr,
             .str = self.str orelse defaults.str,
         };
     }
 };
+pub fn typeHash(T: type) u32 {
+    return IdGenerator.hash(@typeName(T));
+}
 
 test "different sources" {
     const id1 = IdGenerator.toId(.{ .src = @src() });
@@ -222,7 +225,7 @@ test "identical id" {
 }
 
 test "different types" {
-    const id1 = IdGenerator.toId(.{ .type_name = @typeName(IdGenerator) });
-    const id2 = IdGenerator.toId(.{ .type_name = @typeName(i32) });
+    const id1 = IdGenerator.toId(.{ .type_hash = typeHash(IdGenerator) });
+    const id2 = IdGenerator.toId(.{ .type_hash = typeHash(i32) });
     if (id1 == id2) return error.DuplicateId;
 }

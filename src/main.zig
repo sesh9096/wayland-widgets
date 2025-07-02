@@ -48,23 +48,33 @@ pub fn main() !void {
         // Background
         .layer = .background,
         .anchor = .{ .top = true, .bottom = true, .left = true, .right = true },
-        .exclusiveZone = -1,
+        .exclusive = .ignore,
         .namespace = "background",
     });
 
     const output = context.outputs.items[0];
     const window = &windows.items[0];
     var surface = try output.initLayerSurface(&context, window);
+    var bar = try output.initLayerSurface(&context, &.{
+        .layer = .bottom,
+        .anchor = .{ .top = true },
+        .namespace = "bar",
+        .height = 16,
+        .exclusive = .exclude,
+    });
     try surface.setListeners();
+    try bar.setListeners();
     if (context.display.dispatch() != .SUCCESS) return error.DispatchFailed;
 
     const scheduler = &context.scheduler;
     var file_notifier = try FileNotifier.init(allocator);
     defer file_notifier.close();
 
-    try scheduler.addRepeatTask(Task.create(&surface, markDirty), 1000);
+    // try scheduler.addRepeatTask(Task.create(&surface, markDirty), 1000);
+    // try scheduler.addRepeatTask(Task.create(&bar, markDirty), 1000);
     var sw: StatusWidgets = undefined;
-    try sw.configure(&surface, scheduler, &file_notifier);
+    try sw.configure(&bar, scheduler, &file_notifier);
+    var bw = BasicWidgets.init(&surface);
 
     var pollfds = [_]std.posix.pollfd{
         .{
@@ -83,10 +93,13 @@ pub fn main() !void {
         // log.debug("starting poll", .{});
         const timeout = context.scheduler.runPendingGetTimeInterval();
         if (surface.redraw) {
-            try frame(&sw);
+            try frame(&bw);
+        }
+        if (bar.redraw) {
+            try drawBar(&sw);
         }
         if (context.display.flush() != .SUCCESS) return error.DispatchFailed;
-        // should we block indefinitely?
+        // wait for events
         switch (try std.posix.poll(&pollfds, timeout orelse 1)) {
             0 => {
                 // timeout
@@ -119,12 +132,8 @@ pub fn main() !void {
     }
 }
 
-pub fn frame(sw: *StatusWidgets) !void {
+pub fn frame(bw: *BasicWidgets) !void {
     var buf: [64]u8 = undefined;
-    var buf2: [64]u8 = undefined;
-    var buf3: [64]u8 = undefined;
-    var buf4: [64]u8 = undefined;
-    const bw = sw.bw;
     const s = bw.surface;
     s.beginFrame();
     defer s.endFrame();
@@ -136,14 +145,6 @@ pub fn frame(sw: *StatusWidgets) !void {
         defer bw.end(main_layout);
         const innerbox = try bw.row(.{ .src = @src() });
         bw.end(innerbox);
-        {
-            const box = try bw.row(.{ .src = @src() });
-            defer bw.end(box);
-            try sw.time("%I:%M %p %a %b %d,%Y", &buf, .{ .src = @src() });
-            try sw.battery(" {percentage}% {status}", &buf2, .{ .src = @src() });
-            try sw.disk("/home/ss", "{used} {free} {total}", &buf3, .{ .src = @src() });
-            try sw.mem("{MemTotal} {SwapTotal}", &buf4, .{ .src = @src() });
-        }
         const innerbox1 = try bw.row(.{ .src = @src() });
         bw.end(innerbox1);
         try bw.text("Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.", .{ .src = @src() });
@@ -161,6 +162,22 @@ pub fn frame(sw: *StatusWidgets) !void {
     // buf32.ptr = @alignCast(@ptrCast(buf8.ptr));
     // buf32.len = buf8.len / 4;
     // @memset(buf32, @bitCast(try style.Color.fromString("#00ff0000")));
+}
+
+fn drawBar(sw: *StatusWidgets) !void {
+    const bw = sw.bw;
+    const s = bw.surface;
+    s.beginFrame();
+    s.clear();
+    defer s.endFrame();
+    {
+        const box = try bw.row(.{ .src = @src() });
+        defer bw.end(box);
+        try sw.time("%I:%M %p %a %b %d,%Y", .{ .src = @src() });
+        try sw.battery(" {percentage}% {status}", .{ .src = @src() });
+        try sw.disk("/home/ss", "{used} {free} {total}", .{ .src = @src() });
+        try sw.mem("{used} {swapAvail}", .{ .src = @src() });
+    }
 }
 
 pub fn markDirty(surface: *Surface) void {

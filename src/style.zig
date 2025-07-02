@@ -28,7 +28,7 @@ pub const Color = packed struct(u32) {
             return fromStringShort(hex);
         }
         const bits = try std.fmt.parseInt(u32, hex, 16);
-        return @as(Color, @bitCast(bits));
+        return if (hex.len == 8) @as(Color, @bitCast(bits)) else @as(Color, @bitCast(bits << 2));
     }
     fn fromStringShort(str: [:0]const u8) ParseIntError!Color {
         assert(str.len == 3);
@@ -71,6 +71,7 @@ pub const StyleItem = union(enum) {
     fg_color: Color,
     border_color: Color,
     accent_color: Color,
+    clear_color: Color,
 
     default_font: *const Font,
     variable_font: *const Font,
@@ -87,6 +88,7 @@ pub const Theme = struct {
     border_radius: f32 = 0,
 
     bg_color: Color = color("#10101010"),
+    clear_color: Color = color("#10101010"),
     fg_color: Color = color("#ccc"),
     border_color: Color = color("#ccc"),
     accent_color: Color = color("#a50"),

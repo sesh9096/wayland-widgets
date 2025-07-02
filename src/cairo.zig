@@ -24,6 +24,18 @@ pub const Context = opaque {
     // pub fn setSource(self: *Context, pattern: *Pattern) void {
     //     c.cairo_set_source(self, pattern);
     // }
+    extern fn cairo_set_source(self: *Context, source: *Pattern) void;
+    pub const setSource = cairo_set_source;
+
+    extern fn cairo_clip(self: *Context) void;
+    pub const clip = cairo_clip;
+
+    extern fn cairo_clip_preserve(self: *Context) void;
+    pub const clipPreserve = cairo_clip_preserve;
+
+    extern fn cairo_reset_clip(self: *Context) void;
+    pub const resetClip = cairo_reset_clip;
+
     extern fn cairo_set_source_surface(self: *Context, surface: *const Surface, x: f32, y: f32) void;
     pub const setSourceSurface = cairo_set_source_surface;
 
@@ -72,8 +84,22 @@ pub const Context = opaque {
     extern fn cairo_arc(self: *Context, xc: f64, yc: f64, radius: f64, angle1: f64, angle2: f64) void;
     pub const arc = cairo_arc;
 
-    /// draw a rectangle with rounded borders and preserve path
+    extern fn cairo_rectangle(self: *Context, x: f64, y: f64, width: f64, height: f64) void;
+    pub const rectangle = cairo_rectangle;
+
+    /// draw a rectangle with rounded corners
+    /// if radius*2 is larger than width/height, this will set to the maximum size
     pub fn roundRect(self: *Context, rect: Rect, radius: f64) void {
+        if (radius <= 0) {
+            return self.cairo_rectangle(rect.x, rect.y, rect.w, rect.h);
+        }
+        // check radius is not too big accounting for floating_point
+        if (radius * 2 - 0.001 > rect.w) {
+            return self.roundRect(rect, rect.w / 2);
+        }
+        if (radius * 2 - 0.001 > rect.h) {
+            return self.roundRect(rect, rect.h / 2);
+        }
         const halfPi = pi / 2.0;
         self.moveTo(rect.x, rect.y + radius);
         self.arc(rect.x + radius, rect.y + radius, radius, 2 * halfPi, 3 * halfPi);
@@ -91,6 +117,11 @@ pub const Context = opaque {
             @as(f32, @floatFromInt(color.b)) / max_u8,
             @as(f32, @floatFromInt(color.a)) / max_u8,
         );
+    }
+    /// set clip to a rectangle
+    pub fn clipRect(self: *Context, rect: Rect) void {
+        self.rectangle(rect.x, rect.y, rect.w, rect.h);
+        self.clip();
     }
 };
 
@@ -123,6 +154,17 @@ pub const Surface = opaque {
     //     return surface;
     // }
 };
+
+const Pattern = opaque {
+    extern fn cairo_pattern_set_matrix(pattern: *Pattern, matrix: *const Matrix) void;
+    pub const setMatrix = cairo_pattern_set_matrix;
+};
+
+const Matrix = opaque {
+    extern fn cairo_pattern_set_matrix(pattern: *Pattern, matrix: *const Matrix) void;
+    pub const setMatrix = cairo_pattern_set_matrix;
+};
+
 extern fn cairo_format_stride_for_width(format: Format, width: i32) i32;
 pub const formatStrideForWidth = cairo_format_stride_for_width;
 

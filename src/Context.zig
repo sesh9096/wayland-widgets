@@ -137,7 +137,15 @@ const Output = struct {
         const width = if (window.width == 0) self.width else @as(i32, @intCast(window.width));
         const height = if (window.height == 0) self.height else @as(i32, @intCast(window.height));
         layer_surface.setSize(@intCast(width), @intCast(height));
-        layer_surface.setExclusiveZone(window.exclusiveZone);
+        if (window.exclusive == .ignore) {
+            layer_surface.setExclusiveZone(-1);
+        } else if (window.exclusive == .exclude) {
+            if (window.anchor.top != window.anchor.bottom) {
+                layer_surface.setExclusiveZone(@intCast(height));
+            } else if (window.anchor.left != window.anchor.right) {
+                layer_surface.setExclusiveZone(@intCast(width));
+            }
+        }
         layer_surface.setAnchor(window.anchor);
         _ = display;
         // if (display.roundtrip() != .SUCCESS) return error.RoundtripFailed;

@@ -15,11 +15,13 @@ pub const OutputPreference = union(enum) {
 output: OutputPreference = .default,
 layer: wlr.LayerShellV1.Layer,
 namespace: [*:0]const u8,
-exclusiveZone: i32,
+exclusive: ExclusiveOptions = .move,
 anchor: wlr.LayerSurfaceV1.Anchor,
 margins: Margins = .{ .top = 0, .right = 0, .bottom = 0, .left = 0 },
 width: u32 = 0,
 height: u32 = 0,
+
+pub const ExclusiveOptions = enum { ignore, move, exclude };
 
 pub const Margins = struct {
     top: i32,

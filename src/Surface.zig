@@ -31,7 +31,7 @@ allocator: std.mem.Allocator,
 seat: *Seat,
 context: *Context,
 styles: *style.Styles,
-redraw: bool = false,
+redraw: bool = true,
 pointer_widget: ?*Widget = null,
 
 const Self = @This();
@@ -185,6 +185,15 @@ pub fn beginFrameRetained(self: *Self) void {
         self.current_buffer ^= 1;
     }
     self.wl_surface.attach(self.currentBuffer().wl_buffer, 0, 0);
+}
+pub fn clear(self: *Self) void {
+    const clear_color = self.styles.getAttributeNullable(.clear_color);
+    const buf8 = self.currentBuffer().shared_memory;
+    var buf32: []u32 = undefined;
+    buf32.ptr = @alignCast(@ptrCast(buf8.ptr));
+    buf32.len = buf8.len / 4;
+    if (clear_color) |color|
+        @memset(buf32, @bitCast(color));
 }
 
 pub fn endFrame(self: *Self) void {
