@@ -50,12 +50,17 @@ pub fn addWatch(self: *Self, pathname: []const u8, mask: u32, handler: Handler) 
 
 pub fn readEvents(self: Self) !void {
     // TODO: FIXME
-    const NotifyBuffer = extern struct { event: Event, name: [4096 + 1]u8 };
-    var buf: NotifyBuffer = undefined;
-    while (try posix.read(self.fd, std.mem.asBytes(&buf)) != 0) {
-        const event: *Event = @ptrCast(&buf);
+    var buf: [@sizeOf(Event) + std.posix.NAME_MAX + 1]u8 = undefined;
+    // while (true) {
+    const len = try posix.read(self.fd, std.mem.asBytes(&buf));
+    // if (len == 0)
+    // }
+    var start_index: u32 = 0;
+    while (start_index < len) {
+        const event: *Event = @alignCast(@ptrCast((&buf).ptr + start_index));
         const handler = self.handlers.items[@intCast(event.wd)];
         handler.handler(handler.ptr, event);
+        start_index += event.len;
     }
 }
 

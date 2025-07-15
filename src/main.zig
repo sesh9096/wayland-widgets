@@ -75,6 +75,8 @@ pub fn main() !void {
     var sw: StatusWidgets = undefined;
     try sw.configure(&bar, scheduler, &file_notifier);
     var bw = BasicWidgets.init(&surface);
+    try frame(&bw);
+    try drawBar(&sw);
 
     var pollfds = [_]std.posix.pollfd{
         .{
@@ -92,10 +94,11 @@ pub fn main() !void {
     while (true) {
         // log.debug("starting poll", .{});
         const timeout = context.scheduler.runPendingGetTimeInterval();
-        if (surface.redraw) {
+        if (surface.changed()) {
+            log.debug("drawing background", .{});
             try frame(&bw);
         }
-        if (bar.redraw) {
+        if (bar.changed()) {
             try drawBar(&sw);
         }
         if (context.display.flush() != .SUCCESS) return error.DispatchFailed;
@@ -165,6 +168,7 @@ pub fn frame(bw: *BasicWidgets) !void {
 }
 
 fn drawBar(sw: *StatusWidgets) !void {
+    log.debug("drawing bar", .{});
     const bw = sw.bw;
     const s = bw.surface;
     s.beginFrame();
@@ -176,7 +180,7 @@ fn drawBar(sw: *StatusWidgets) !void {
         try sw.time("%I:%M %p %a %b %d,%Y", .{ .src = @src() });
         try sw.battery(" {percentage}% {status}", .{ .src = @src() });
         try sw.disk("/home/ss", "{used} {free} {total}", .{ .src = @src() });
-        try sw.mem("{used} {swapAvail}", .{ .src = @src() });
+        try sw.mem("{used} 󰒋  {swapUsed} ", .{ .src = @src() });
     }
 }
 

@@ -15,14 +15,14 @@ const cairo = @import("./cairo.zig");
 const common = @import("./common.zig");
 const Widget = common.Widget;
 const Rect = common.Rect;
-const Point = common.Point;
+const Vec2 = common.Vec2;
 const style = common.style;
 const WidgetFromId = std.AutoHashMap(u32, *Widget);
+const WidgetList = std.ArrayList(*Widget);
 
 wl_surface: *wl.Surface,
-shared_memory: []align(std.mem.page_size) u8,
-width: i32,
-height: i32,
+shared_memory: []align(std.mem.page_size) u8 = &.{},
+size: Vec2,
 buffers: [2]Buffer,
 current_buffer: u1 = 0,
 widget: ?*Widget = null,
@@ -31,7 +31,9 @@ allocator: std.mem.Allocator,
 seat: *Seat,
 context: *Context,
 styles: *style.Styles,
-redraw: bool = true,
+/// list of widgets which have been updated and need to be redrawn
+redraw_list: WidgetList,
+/// what the pointer is currently hovering over
 pointer_widget: ?*Widget = null,
 
 const Self = @This();
@@ -50,6 +52,7 @@ fn deinit(self: *@This()) void {
         buffer.deinit();
     }
     self.widget_storage.deinit();
+    self.redraw_list.deinit();
 }
 
 pub fn fromWlSurface(context: *Context, wl_surface: *wl.Surface, width: i32, height: i32) !Self {
@@ -77,10 +80,10 @@ pub fn fromWlSurface(context: *Context, wl_surface: *wl.Surface, width: i32, hei
     return Self{
         .wl_surface = wl_surface,
         .context = context,
-        .width = width,
-        .height = height,
+        .size = .{ .x = @floatFromInt(width), .y = @floatFromInt(height) },
         .shared_memory = pool,
         .widget_storage = WidgetFromId.init(allocator),
+        .redraw_list = WidgetList.init(allocator),
         .allocator = allocator,
         .seat = &context.seat,
         .styles = &style.default_styles,
@@ -110,16 +113,16 @@ pub fn setListeners(self: *Self) !void {
     try self.seat.registerSurface(self);
 }
 pub fn notify(self: *Self, event: anytype) void {
-    self.redraw = true;
     const eventType = @TypeOf(event);
     if (eventType == wl.Pointer.Event) {}
+    _ = self;
 }
 pub fn getPointer(self: *Self) ?*Seat.Pointer {
     const pointer = &self.seat.pointer;
     return if (pointer.surface == self) pointer else null;
 }
 
-pub fn getDeepestWidgetAtPoint(self: *Self, point: Point) ?*Widget {
+pub fn getDeepestWidgetAtPoint(self: *Self, point: Vec2) ?*Widget {
     if (self.widget) |initial_widget| {
         var widget = initial_widget;
         outer: for (1..1000) |_| { // No Infinite Loops
@@ -146,7 +149,7 @@ pub fn handleInputs(self: *Self) void {
         if (self.getDeepestWidgetAtPoint(pointer.pos)) |widget_initial| {
             var widget_opt: ?*Widget = widget_initial;
             while (widget_opt) |widget| {
-                widget.vtable.handleInput(widget, self) catch {};
+                widget.vtable.handleInput(widget) catch {};
                 if (pointer.handled) {
                     break;
                 } else {
@@ -157,7 +160,7 @@ pub fn handleInputs(self: *Self) void {
             }
             if (self.pointer_widget) |prev| {
                 // we have already handled in this case
-                if (prev != widget_opt) prev.vtable.handleInput(prev, self) catch {};
+                if (prev != widget_opt) prev.vtable.handleInput(prev) catch {};
             }
             self.pointer_widget = widget_opt;
         }
@@ -199,24 +202,50 @@ pub fn clear(self: *Self) void {
 pub fn endFrame(self: *Self) void {
     // _ = self.currentBuffer().cairo_surf.writeToPng("debug1.png");
     // draw
-    if (self.widget) |widget| {
-        // log.debug("Attempting to draw widgets", .{});
-        widget.vtable.proposeSize(widget, self);
-        widget.rect = Rect{ .w = @floatFromInt(self.width), .h = @floatFromInt(self.height) };
-        widget.vtable.draw(widget, self) catch {};
+    // if (self.widget) |widget| {
+    //     // log.debug("Attempting to draw widgets", .{});
+    //     widget.vtable.proposeSize(widget);
+    //     widget.draw(Rect{ .w = @floatFromInt(self.width), .h = @floatFromInt(self.height) }) catch {};
+    // }
+    for (self.redraw_list.items) |widget| {
+        // Rect{ .w = @floatFromInt(self.width), .h = @floatFromInt(self.height) }
+        // log.debug("drawing {*}", .{widget});
+        widget.in_frame = false;
+        widget.draw(if (widget == self.widget) Rect.fromSize(self.size) else widget.rect) catch {};
+        self.wl_surface.damage(
+            @intFromFloat(widget.rect.x),
+            @intFromFloat(widget.rect.y),
+            @intFromFloat(widget.rect.x + widget.rect.w),
+            @intFromFloat(widget.rect.y + widget.rect.h),
+        );
+        //self.wl_surface.damage( 0, 0, math.maxInt(@TypeOf(self.width)), math.maxInt(@TypeOf(self.height)));
     }
     self.currentBuffer().usable = false;
-    self.wl_surface.damage(0, 0, math.maxInt(@TypeOf(self.width)), math.maxInt(@TypeOf(self.height)));
     self.wl_surface.commit();
-    self.redraw = false;
+    self.redraw_list.clearRetainingCapacity();
     self.seat.transitionState();
 }
 
+/// make it so subsequent widgets will be appended to the widget's parent
 pub fn end(self: *Self, widget: *Widget) void {
     assert(widget == self.widget);
     if (widget.parent) |parent| {
         self.widget = parent;
+    } else {
+        // we are redrawing everything
+        self.redraw_list.clearRetainingCapacity();
+        self.redraw_list.append(widget);
     }
+}
+/// convenience function to draw a frame
+pub fn frame(self: *Self) void {
+    self.beginFrameRetained();
+    self.endFrame();
+}
+
+/// check if we need to redraw
+pub fn changed(self: *Self) bool {
+    return self.redraw_list.items.len != 0;
 }
 
 /// Add widget as a child of the current widget.
@@ -224,7 +253,7 @@ pub fn end(self: *Self, widget: *Widget) void {
 pub fn addWidget(self: *const Self, widget: *Widget) !void {
     if (self.widget) |parent| {
         widget.parent = parent;
-        try parent.vtable.addChild(parent, widget);
+        try parent.addChild(widget);
     } else {
         widget.parent = null;
     }
@@ -244,11 +273,15 @@ pub fn getWidget(self: *Self, id_gen: common.IdGenerator, T: type) !*Widget {
     const id = id_gen.toId();
     const get_or_put_res = try self.widget_storage.getOrPut(id);
     const widget = if (get_or_put_res.found_existing) get_or_put_res.value_ptr.* else blk: {
-        // log.debug("Created {s} widget with id {}", .{ @typeName(T), id });
         const wid = try Widget.createWidget(self, T);
+        // log.debug("Created {s} widget with id {x} at {*}", .{ @typeName(T), id, wid });
         get_or_put_res.value_ptr.* = wid;
         break :blk wid;
     };
+    // check that the widget has not already been used elsewhere in frame
+    // log.debug("Created {s} widget with id {x}", .{ @typeName(T), id });
+    if (widget.in_frame) return error.DuplicateId;
+    widget.in_frame = true;
     return widget;
 }
 

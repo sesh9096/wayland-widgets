@@ -17,11 +17,14 @@ pub const c = @cImport({
     @cInclude("pango/pangocairo.h");
     @cInclude("time.h");
 });
-pub const Point = struct {
+pub const Vec2 = struct {
     x: f32 = 0,
     y: f32 = 0,
-    pub fn in(self: *const Point, rect: Rect) bool {
+    pub fn in(self: *const Vec2, rect: Rect) bool {
         return (self.x >= rect.x and self.y >= rect.y) and (self.x <= (rect.x + rect.w) and self.y <= (rect.y + rect.h));
+    }
+    pub fn format(value: Vec2, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+        try writer.print("({d}, {d})", .{ value.x, value.y });
     }
 };
 pub const Rect = struct {
@@ -69,6 +72,16 @@ pub const Rect = struct {
             .w = self.w / divisor,
             .h = self.h / divisor,
         };
+    }
+
+    pub fn larger(a: Rect, b: Rect) bool {
+        return a.h > b.h and a.w > b.w;
+    }
+    pub fn size(self: Rect) Vec2 {
+        return Vec2{ .x = self.w, .y = self.h };
+    }
+    pub fn fromSize(v: Vec2) Rect {
+        return Rect{ .w = v.x, .h = v.y };
     }
 };
 // match with PangoRectangle
@@ -129,6 +142,13 @@ pub const Expand = enum {
     }
 };
 
+pub const hash = std.hash.CityHash32.hash;
+pub fn hash_any(input: anytype) u32 {
+    var ret: []const u8 = undefined;
+    ret.ptr = @ptrCast(&input);
+    ret.len = @sizeOf(@TypeOf(input));
+    return hash(ret);
+}
 /// Config for generating Id's, use `.id` for direct control or `.src` and optionally `.extra`
 pub const IdGenerator = struct {
     id: ?u32 = null,
@@ -148,13 +168,6 @@ pub const IdGenerator = struct {
     str: ?[]const u8 = null,
 
     // note: we are not using std.hash.uint32 because of problems with 0
-    const hash = std.hash.CityHash32.hash;
-    pub fn hash_any(input: anytype) u32 {
-        var ret: []const u8 = undefined;
-        ret.ptr = @ptrCast(&input);
-        ret.len = @sizeOf(@TypeOf(input));
-        return hash(ret);
-    }
     fn idFromSourceLocation(location: SourceLocation) u32 {
         return hash_any(location.line) ^ hash_any(location.column);
     }
@@ -199,7 +212,7 @@ pub const IdGenerator = struct {
     }
 };
 pub fn typeHash(T: type) u32 {
-    return IdGenerator.hash(@typeName(T));
+    return hash(@typeName(T));
 }
 
 test "different sources" {

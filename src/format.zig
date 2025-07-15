@@ -90,6 +90,8 @@ pub fn formatToBuffer(s: anytype, fmt: []const u8, buffer: []u8) ![]u8 {
 pub fn formatToArrayList(s: anytype, fmt: []const u8, array_list: *std.ArrayList(u8)) !void {
     const writer = array_list.writer();
     try format(s, fmt, writer);
+    try array_list.append(0);
+    array_list.items.len -= 1;
 }
 
 test "basic" {

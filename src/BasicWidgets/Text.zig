@@ -9,27 +9,62 @@ const pango = common.pango;
 const Rect = common.Rect;
 
 text: [:0]const u8,
-pub fn configure(self: *@This(), text: [:0]const u8) void {
-    self.text = text;
+hash: u32,
+layout: *pango.Layout,
+pub fn init(widget: *Widget) void {
+    const self = widget.getInner(@This());
+    const cr = widget.surface.getCairoContext();
+    self.layout = pango.PangoCairo.createLayout(cr);
 }
-pub fn draw(widget: *Widget, surface: *Surface) !void {
+pub fn configure(widget: *Widget, text: [:0]const u8) !void {
+    const surface = widget.surface;
+    const self = widget.getInner(@This());
+    self.text = text;
+    const layout = self.layout;
+    const hash = common.hash(text);
+    if (self.hash != hash) {
+        const style = if (widget.styles) |style| style else surface.styles;
+        const fallback = if (widget.styles) |_| surface.styles else null;
+        const font_description = style.getAttribute(.default_font, fallback).describe();
+        layout.setFontDescription(font_description);
+        layout.setText(text, @intCast(text.len));
+        try widget.updated();
+    }
+}
+
+pub fn draw(widget: *Widget) !void {
+    const surface = widget.surface;
     const cr = surface.getCairoContext();
-    const bounding_box = widget.drawDecorationAdjustSize(surface);
+    const rect = widget.drawDecorationAdjustSize();
+    const layout = widget.getInner(@This()).layout;
+    const text = widget.getInner(@This()).text;
+    // defer label.layout.free();
+
     const style = if (widget.styles) |style| style else surface.styles;
     const fallback = if (widget.styles) |_| surface.styles else null;
     const font_description = style.getAttribute(.variable_font, fallback).describe();
-    const layout = pango.PangoCairo.createLayout(cr);
-    defer layout.free();
     layout.setFontDescription(font_description);
-    layout.setWidth(@intFromFloat(bounding_box.w * pango.SCALE));
-    layout.setHeight(@intFromFloat(bounding_box.h * pango.SCALE));
-    const text = widget.getInner(@This()).text;
+    layout.setWidth(@intFromFloat(rect.w * pango.SCALE));
+    layout.setHeight(@intFromFloat(rect.h * pango.SCALE));
     layout.setText(text, -1);
     cr.setSourceRgb(1, 1, 1);
-    cr.moveTo(bounding_box.x, bounding_box.y);
+    cr.moveTo(rect.x, rect.y);
+    cr.setLineWidth(1);
     pango.PangoCairo.showLayout(cr, layout);
-    // log.debug("Drawing text {} at {} {}", .{ text, bounding_box.x, bounding_box.y });
+    // log.debug("Drawing text {} at {} {}", .{ text, rect.x, rect.y });
 }
+
+pub fn proposeSize(widget: *Widget) void {
+    // const label = widget.getInner(@This());
+    // const layout = label.layout;
+    // var rect: common.IRect = undefined;
+    // _ = layout.getPixelExtents(null, &rect);
+    widget.rect.w = 0;
+    widget.rect.h = 0;
+    // widget.rect = rect.toRect();
+}
+
 pub const vtable = Widget.Vtable{
     .draw = draw,
+    .proposeSize = proposeSize,
 };

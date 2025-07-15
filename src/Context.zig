@@ -15,7 +15,7 @@ const Surface = @import("./Surface.zig");
 const LayerSurfaceWindow = @import("./LayerSurfaceWindow.zig");
 const common = @import("./common.zig");
 const Rect = common.Rect;
-const Point = common.Point;
+const Vec2 = common.Vec2;
 const KeyState = common.KeyState;
 const pango = common.pango;
 const style = common.style;
@@ -197,7 +197,7 @@ pub const Seat = struct {
     // touch: void,
     const Surfaces = std.ArrayList(*Surface);
     pub const Pointer = struct {
-        pos: Point = .{},
+        pos: Vec2 = .{},
         button: ?Button = null,
         surface: ?*Surface = null,
         handled: bool = false,

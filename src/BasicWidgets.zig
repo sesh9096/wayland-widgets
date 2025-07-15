@@ -6,11 +6,11 @@ const assert = std.debug.assert;
 const cairo = @import("./cairo.zig");
 const pango = @import("./pango.zig");
 const Widget = @import("./Widget.zig");
-const WidgetList = std.ArrayList(*Widget);
+pub const WidgetList = std.ArrayList(*Widget);
 const Surface = @import("./Surface.zig");
 const common = @import("./common.zig");
 const Rect = common.Rect;
-const Point = common.Point;
+const Vec2 = common.Vec2;
 const Direction = common.Direction;
 const Expand = common.Expand;
 const IdGenerator = common.IdGenerator;
@@ -42,7 +42,7 @@ pub fn deinit(self: *Self) void {
 pub fn addWidget(self: *const Self, widget: *Widget) !void {
     if (self.surface.widget) |parent| {
         widget.parent = parent;
-        try parent.vtable.addChild(parent, widget);
+        try parent.vtable.childAction(parent, .add, widget);
     } else {
         widget.parent = null;
     }
@@ -81,6 +81,7 @@ pub fn getBox(self: *const Self, direction: Direction, expand: Expand, id_gen: I
 }
 pub fn box(self: *const Self, direction: Direction, expand: Expand, id_gen: IdGenerator) !*Widget {
     const widget = try self.getBox(direction, expand, id_gen);
+    widget.clearChildren();
     try self.addWidgetSetCurrent(widget);
     return widget;
 }
@@ -131,7 +132,7 @@ pub fn image(self: *Self, path: [:0]const u8, option: Image.Option, id_gen: IdGe
 
 pub fn getText(self: *const Self, txt: [:0]const u8, id_gen: IdGenerator) !*Widget {
     const widget = try self.getWidget(id_gen, Text);
-    widget.getInner(Text).configure(txt);
+    try Text.configure(widget, txt);
     return widget;
 }
 pub fn text(self: *const Self, txt: [:0]const u8, id_gen: IdGenerator) !void {
@@ -141,7 +142,7 @@ pub fn text(self: *const Self, txt: [:0]const u8, id_gen: IdGenerator) !void {
 
 pub fn getLabel(self: *const Self, txt: [:0]const u8, id_gen: IdGenerator) !*Widget {
     const widget = try self.getWidget(id_gen, Label);
-    widget.getInner(Label).configure(txt);
+    try Label.configure(widget, txt);
     return widget;
 }
 
@@ -154,7 +155,7 @@ pub fn getButton(self: *const Self, id_gen: IdGenerator) !*Widget {
 pub fn button(self: *const Self, txt: [:0]const u8, id_gen: IdGenerator) !*Button {
     const widget = try self.getButton(id_gen);
     const label_widget = try self.getLabel(txt, id_gen.addExtra(0));
-    try widget.vtable.addChild(widget, label_widget);
+    try widget.addChild(label_widget);
     label_widget.parent = widget;
     try self.addWidget(widget);
     return widget.getInner(Button);
@@ -163,19 +164,21 @@ pub fn button(self: *const Self, txt: [:0]const u8, id_gen: IdGenerator) !*Butto
 pub const Image = struct {
     surface: *const cairo.Surface,
     option: Option = .stretch,
-    size: Point,
+    size: Vec2,
     pub const Option = enum { stretch, fit, fill, center, tile };
     pub fn configure(self: *@This(), surface: *const cairo.Surface, option: Option) void {
         self.surface = surface;
         self.option = option;
         self.size = .{ .x = @floatFromInt(surface.getWidth()), .y = @floatFromInt(surface.getHeight()) };
     }
-    pub fn draw(self: *Widget, surface: *Surface) !void {
-        const rect = self.rect;
+    pub fn draw(widget: *Widget) !void {
+        const surface = widget.surface;
+        const rect = widget.rect;
         const cr = surface.currentBuffer().cairo_context;
-        const image_surface = self.getInner(@This()).surface;
-        const option = self.getInner(@This()).option;
-        const size = self.getInner(@This()).size;
+        const self = widget.getInner(@This());
+        const image_surface = self.surface;
+        const option = self.option;
+        const size = self.size;
         cr.save();
         defer cr.restore();
         // log.debug("Drawing image at {} {}", .{ bounding_box.x, bounding_box.y });
@@ -204,40 +207,56 @@ pub const Image = struct {
     };
 };
 
+pub fn indexOfWidget(list: WidgetList, item: *Widget) ?usize {
+    return std.mem.indexOfScalar(*Widget, list.items, item);
+}
+
 /// draw multiple widgets on top of each other
 pub const Overlay = struct {
     children: WidgetList,
-    pub fn init(self: *Overlay, allocator: std.mem.Allocator) void {
-        self.children = WidgetList.init(allocator);
+    pub fn init(widget: *Widget) void {
+        const self = widget.getInner(@This());
+        self.children = WidgetList.init(widget.surface.allocator);
     }
-    pub fn configure(self: *Overlay) void {
-        self.children.items.len = 0;
-    }
-    fn draw(widget: *Widget, surface: *Surface) !void {
-        const rect = widget.drawDecorationAdjustSize(surface);
+    pub fn configure(_: *Overlay) void {}
+    fn draw(widget: *Widget) !void {
+        const rect = widget.drawDecorationAdjustSize();
         for (widget.getInner(@This()).children.items) |child| {
-            child.rect = rect;
-            try child.vtable.draw(child, surface);
+            try child.draw(rect);
         }
         // try top.vtable.draw(top, surface, self.inner.overlay.top_rect);
     }
-    pub fn addChild(self: *Widget, child: *Widget) !void {
+    pub fn childAction(widget: *Widget, action: Widget.Action, child: *Widget) !void {
         // TODO: create an special child type to allow for placing items at specific locations
-        try self.getInner(@This()).children.append(child);
+        const self = widget.getInner(@This());
+        switch (action) {
+            .add => try self.children.append(child),
+            .updated => if (indexOfWidget(self.children, child)) |index| {
+                _ = index;
+            } else {
+                log.err("children: {}", .{self.children.items.len});
+                return error.InvalidChild;
+            },
+            .remove => if (indexOfWidget(self.children, child)) |index| {
+                _ = self.children.orderedRemove(index);
+            } else {
+                return error.InvalidChild;
+            },
+            .clear => self.children.clearRetainingCapacity(),
+        }
     }
     pub fn getChildren(self: *Widget) []*Widget {
-        // TODO: create an special child type to allow for placing items at specific locations
         return self.getInner(@This()).children.items;
     }
-    pub fn proposeSize(widget: *Widget, surface: *Surface) void {
+    pub fn proposeSize(widget: *Widget) void {
         // TODO: iterate
         for (widget.getInner(@This()).children.items) |child| {
-            child.vtable.proposeSize(child, surface);
+            child.vtable.proposeSize(child);
         }
     }
     pub const vtable = Widget.Vtable{
         .draw = draw,
-        .addChild = addChild,
+        .childAction = childAction,
         .getChildren = getChildren,
         .proposeSize = proposeSize,
     };
