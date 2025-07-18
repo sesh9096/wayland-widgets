@@ -18,7 +18,7 @@ const Rect = common.Rect;
 const Vec2 = common.Vec2;
 const KeyState = common.KeyState;
 const pango = common.pango;
-const style = common.style;
+const Style = common.Style;
 const c = @cImport({
     @cInclude("linux/input-event-codes.h");
 });
@@ -43,12 +43,12 @@ pub fn init(allocator: Allocator) !@This() {
     const font_description = pango.FontDescription.fromString("monospace");
     font_description.setAbsoluteSize(pango.SCALE * 11);
     defer font_description.free();
-    style.default_theme.default_font = font_map.loadFont(pango_context, font_description);
+    Style.default_theme.default_font = font_map.loadFont(pango_context, font_description);
 
     const variable_font_description = pango.FontDescription.fromString("sans-serif");
     variable_font_description.setAbsoluteSize(pango.SCALE * 11);
     defer variable_font_description.free();
-    style.default_theme.variable_font = font_map.loadFont(pango_context, variable_font_description);
+    Style.default_theme.variable_font = font_map.loadFont(pango_context, variable_font_description);
     return @This(){
         .allocator = allocator,
         .display = try wl.Display.connect(null),

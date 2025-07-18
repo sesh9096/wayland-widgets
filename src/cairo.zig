@@ -2,9 +2,8 @@
 const std = @import("std");
 const pi = std.math.pi;
 const common = @import("./common.zig");
-const style = common.style;
 const Rect = common.Rect;
-const Color = style.Color;
+const Color = common.Style.Color;
 
 const c = common.c;
 

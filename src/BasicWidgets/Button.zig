@@ -7,7 +7,7 @@ const Widget = common.Widget;
 const cairo = common.cairo;
 const Rect = common.Rect;
 const Vec2 = common.Vec2;
-const Styles = common.style.Styles;
+const Style = common.Style;
 const Button = @This();
 
 child: ?*Widget,
@@ -84,7 +84,7 @@ pub fn proposeSize(widget: *Widget) void {
         widget.rect.h = 1;
     }
 }
-pub const default_style = Styles{
+pub const default_style = Style{
     .parent = null,
     .items = &.{ .{ .border_radius = 4 }, .{ .border_width = 1 } },
 };

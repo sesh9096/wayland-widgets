@@ -1,3 +1,6 @@
+//! a tree style list of style overrides
+//! note: searching can become slow if there are too many layers
+
 const std = @import("std");
 const log = std.log;
 const assert = std.debug.assert;
@@ -6,8 +9,30 @@ const Rect = common.Rect;
 const cairo = common.cairo;
 pub const Font = common.pango.Font;
 pub const Surface = common.Surface;
+pub const Self = @This();
 
-pub var default_styles: Styles = Styles{
+parent: ?*Self = null,
+items: []const Item = &.{},
+
+/// get attribute from style, fallback to default theme
+pub fn getAttribute(self: *const Self, comptime attribute: Item.Tag) std.meta.TagPayload(Item, attribute) {
+    if (self.getAttributeNullable(attribute)) |attr| {
+        return attr;
+    }
+    return default_theme.getAttribute(attribute);
+}
+pub fn getAttributeNullable(self: *const Self, comptime attribute: Item.Tag) ?std.meta.TagPayload(Item, attribute) {
+    for (self.items) |style| {
+        if (style == attribute) {
+            return @field(style, @tagName(attribute));
+        } else if (style == .theme) {
+            return style.theme.getAttribute(attribute);
+        }
+    }
+    return if (self.parent) |parent| parent.getAttributeNullable(attribute) else null;
+}
+
+pub var default_style: Self = Self{
     .parent = null,
     .items = &.{.{ .theme = &default_theme }},
 };
@@ -61,7 +86,7 @@ pub const Color = packed struct(u32) {
 pub const color = Color.fromAnyNoError;
 
 /// Override defaults for widget or widgets
-pub const StyleItem = union(enum) {
+pub const Item = union(enum) {
     margin: f32,
     padding: f32,
     border_width: f32,
@@ -77,7 +102,7 @@ pub const StyleItem = union(enum) {
     variable_font: *const Font,
 
     theme: *const Theme,
-    pub const Tag = std.meta.Tag(StyleItem);
+    pub const Tag = std.meta.Tag(Item);
 };
 
 /// Setting all styles at once, can be the base of a Style chain
@@ -96,8 +121,8 @@ pub const Theme = struct {
     default_font: *const Font,
     variable_font: ?*const Font = null,
 
-    pub fn getAttribute(self: Theme, comptime attribute: StyleItem.Tag) std.meta.TagPayload(StyleItem, attribute) {
-        const tag: std.meta.Tag(StyleItem) = attribute;
+    pub fn getAttribute(self: Theme, comptime attribute: Item.Tag) std.meta.TagPayload(Item, attribute) {
+        const tag: std.meta.Tag(Item) = attribute;
         return switch (tag) {
             .variable_font => if (self.variable_font) |font| font else self.default_font,
             else => @field(self, @tagName(tag)),
@@ -105,35 +130,6 @@ pub const Theme = struct {
     }
 };
 
-/// a tree style list of style overrides
-/// note: searching can become slow if there are too many layers
-pub const Styles = struct {
-    parent: ?*Styles,
-    items: []const StyleItem,
-    /// draw border and background and return the new size of the rect
-    pub fn getAttribute(self: *const Styles, comptime attribute: StyleItem.Tag, fallback: ?*const Styles) std.meta.TagPayload(StyleItem, attribute) {
-        if (self.getAttributeNullable(attribute)) |attr| {
-            return attr;
-        } else if (self != fallback and fallback != null) {
-            if (fallback.?.getAttributeNullable(attribute)) |attr| {
-                return attr;
-            }
-        }
-        log.warn("Fallback is null or has no attribute " ++ @tagName(attribute) ++ ", looking in default theme", .{});
-        return default_theme.getAttribute(attribute);
-    }
-    pub fn getAttributeNullable(self: *const Styles, comptime attribute: StyleItem.Tag) ?std.meta.TagPayload(StyleItem, attribute) {
-        for (self.items) |style| {
-            if (style == attribute) {
-                return @field(style, @tagName(attribute));
-            } else if (style == .theme) {
-                return style.theme.getAttribute(attribute);
-            }
-        }
-        return if (self.parent) |parent| parent.getAttributeNullable(attribute) else null;
-    }
-};
-
 test "info" {
-    std.debug.print("Style Size: {} bytes\n", .{@sizeOf(StyleItem)});
+    std.debug.print("Style Size: {} bytes\n", .{@sizeOf(Item)});
 }

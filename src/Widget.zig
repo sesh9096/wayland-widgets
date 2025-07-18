@@ -5,14 +5,14 @@ const log = std.log;
 const common = @import("./common.zig");
 const Surface = common.Surface;
 const Rect = common.Rect;
-const Styles = common.style.Styles;
+const Style = common.Style;
 const Widget = @This();
 
 inner: *anyopaque,
 vtable: *const Vtable = &.{},
 parent: ?*Widget = null,
 surface: *Surface,
-styles: ?*const Styles = null,
+style: *const Style,
 rect: Rect = .{},
 in_frame: bool = false,
 redraw: bool = true,
@@ -72,7 +72,7 @@ pub fn createWidget(surface: *Surface, T: type) !*Widget {
     wid.* = Widget{
         .vtable = &T.vtable,
         .inner = inner,
-        .styles = if (@hasDecl(T, "style")) T.style else null,
+        .style = &surface.style,
         .surface = surface,
         .rect = Rect{},
         .in_frame = false,
@@ -86,16 +86,15 @@ pub fn drawDecorationAdjustSize(widget: *Widget) Rect {
     const surface = widget.surface;
     const cr = surface.getCairoContext();
     const rect = widget.rect;
-    const style = if (widget.styles) |style| style else surface.styles;
-    const fallback = if (widget.styles) |_| surface.styles else null;
-    const padding = style.getAttribute(.padding, fallback);
-    const margin = style.getAttribute(.margin, fallback);
+    const style = widget.style;
+    const padding = style.getAttribute(.padding);
+    const margin = style.getAttribute(.margin);
     const border_rect = rect.subtractSpacing(margin, margin);
-    cr.setLineWidth(style.getAttribute(.border_width, fallback));
-    cr.roundRect(border_rect, style.getAttribute(.border_radius, fallback));
-    cr.setSourceColor(style.getAttribute(.border_color, fallback));
+    cr.setLineWidth(style.getAttribute(.border_width));
+    cr.roundRect(border_rect, style.getAttribute(.border_radius));
+    cr.setSourceColor(style.getAttribute(.border_color));
     cr.strokePreserve();
-    cr.setSourceColor(style.getAttribute(.bg_color, fallback));
+    cr.setSourceColor(style.getAttribute(.bg_color));
     cr.fill();
     return rect.subtractSpacing(padding, padding);
 }

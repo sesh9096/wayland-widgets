@@ -17,15 +17,12 @@ pub fn init(widget: *Widget) void {
     self.layout = pango.PangoCairo.createLayout(cr);
 }
 pub fn configure(widget: *Widget, text: [:0]const u8) !void {
-    const surface = widget.surface;
     const self = widget.getInner(@This());
     self.text = text;
     const layout = self.layout;
     const hash = common.hash(text);
     if (self.hash != hash) {
-        const style = if (widget.styles) |style| style else surface.styles;
-        const fallback = if (widget.styles) |_| surface.styles else null;
-        const font_description = style.getAttribute(.default_font, fallback).describe();
+        const font_description = widget.style.getAttribute(.default_font).describe();
         layout.setFontDescription(font_description);
         layout.setText(text, @intCast(text.len));
         try widget.updated();
@@ -40,9 +37,7 @@ pub fn draw(widget: *Widget) !void {
     const text = widget.getInner(@This()).text;
     // defer label.layout.free();
 
-    const style = if (widget.styles) |style| style else surface.styles;
-    const fallback = if (widget.styles) |_| surface.styles else null;
-    const font_description = style.getAttribute(.variable_font, fallback).describe();
+    const font_description = widget.style.getAttribute(.variable_font).describe();
     layout.setFontDescription(font_description);
     layout.setWidth(@intFromFloat(rect.w * pango.SCALE));
     layout.setHeight(@intFromFloat(rect.h * pango.SCALE));

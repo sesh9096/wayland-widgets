@@ -16,7 +16,7 @@ const common = @import("./common.zig");
 const Widget = common.Widget;
 const Rect = common.Rect;
 const Vec2 = common.Vec2;
-const style = common.style;
+const Style = common.Style;
 const WidgetFromId = std.AutoHashMap(u32, *Widget);
 const WidgetList = std.ArrayList(*Widget);
 
@@ -30,7 +30,7 @@ widget_storage: WidgetFromId,
 allocator: std.mem.Allocator,
 seat: *Seat,
 context: *Context,
-styles: *style.Styles,
+style: Style,
 /// list of widgets which have been updated and need to be redrawn
 redraw_list: WidgetList,
 /// what the pointer is currently hovering over
@@ -86,7 +86,7 @@ pub fn fromWlSurface(context: *Context, wl_surface: *wl.Surface, width: i32, hei
         .redraw_list = WidgetList.init(allocator),
         .allocator = allocator,
         .seat = &context.seat,
-        .styles = &style.default_styles,
+        .style = Style.default_style,
         .buffers = .{
             Buffer{
                 .wl_buffer = try shm_pool.createBuffer(0, width, height, width * 4, .argb8888),
@@ -190,7 +190,7 @@ pub fn beginFrameRetained(self: *Self) void {
     self.wl_surface.attach(self.currentBuffer().wl_buffer, 0, 0);
 }
 pub fn clear(self: *Self) void {
-    const clear_color = self.styles.getAttributeNullable(.clear_color);
+    const clear_color = self.style.getAttributeNullable(.clear_color);
     const buf8 = self.currentBuffer().shared_memory;
     var buf32: []u32 = undefined;
     buf32.ptr = @alignCast(@ptrCast(buf8.ptr));
