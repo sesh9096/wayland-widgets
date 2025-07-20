@@ -5,7 +5,7 @@ const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
 const common = @import("./common.zig");
 const Style = common.Style;
-const Window = @import("./LayerSurfaceWindow.zig");
+const LayerSurface = @import("./LayerSurface.zig");
 const Scheduler = @import("./Scheduler.zig");
 const Task = Scheduler.Task;
 const Surface = @import("./Surface.zig");
@@ -13,7 +13,7 @@ pub const Context = @import("./Context.zig");
 pub const BasicWidgets = @import("./BasicWidgets.zig");
 pub const StatusWidgets = @import("./StatusWidgets.zig");
 pub const Seat = Context.Seat;
-pub const Windows = std.ArrayList(Window);
+// pub const Windows = std.ArrayList(Window);
 const c = common.c;
 const FileNotifier = common.FileNotifier;
 
@@ -42,28 +42,40 @@ pub fn main() !void {
 
     const options = Options.parseArgs();
     _ = options;
-    var windows = Windows.init(allocator);
+    // var windows = Windows.init(allocator);
     // _ = image;
-    try windows.append(.{
-        // Background
-        .layer = .background,
-        .anchor = .{ .top = true, .bottom = true, .left = true, .right = true },
-        .exclusive = .ignore,
-        .namespace = "background",
-    });
+    // try windows.append(.{
+    // Background
+    var bg_layer: LayerSurface = undefined;
+    try bg_layer.init(
+        &context,
+        .background,
+        null,
+        "background",
+        .{},
+        .{ .top = true, .bottom = true, .left = true, .right = true },
+        .ignore,
+    );
+    const surface = bg_layer.getSurface();
+    var bar_layer: LayerSurface = undefined;
+    try bar_layer.init(
+        &context,
+        .bottom,
+        null,
+        "bar",
+        .{ .y = 16 },
+        .{ .top = true, .left = true, .right = true },
+        .exclude,
+    );
+    const bar = bar_layer.getSurface();
 
-    const output = context.outputs.items[0];
-    const window = &windows.items[0];
-    var surface = try output.initLayerSurface(&context, window);
-    var bar = try output.initLayerSurface(&context, &.{
-        .layer = .bottom,
-        .anchor = .{ .top = true },
-        .namespace = "bar",
-        .height = 16,
-        .exclusive = .exclude,
-    });
-    try surface.setListeners();
-    try bar.setListeners();
+    // .layer = .background,
+    // .anchor = .{ .top = true, .bottom = true, .left = true, .right = true },
+    // .exclusive = .ignore,
+    // .namespace = "background",
+    // });
+
+    // const window = &windows.items[0];
     if (context.display.dispatch() != .SUCCESS) return error.DispatchFailed;
 
     const scheduler = &context.scheduler;
@@ -73,8 +85,8 @@ pub fn main() !void {
     // try scheduler.addRepeatTask(Task.create(&surface, markDirty), 1000);
     // try scheduler.addRepeatTask(Task.create(&bar, markDirty), 1000);
     var sw: StatusWidgets = undefined;
-    try sw.configure(&bar, scheduler, &file_notifier);
-    var bw = BasicWidgets.init(&surface);
+    try sw.configure(bar, scheduler, &file_notifier);
+    var bw = BasicWidgets.init(surface);
     try frame(&bw);
     try drawBar(&sw);
 
@@ -108,18 +120,7 @@ pub fn main() !void {
                 // timeout
             },
             else => |num_events| {
-                // events
-                // log.debug("Got input from {} fd's", .{num_events});
                 var num_events_remaining = num_events;
-                // for (pollfds) |pollfd| {
-                //     if (pollfd.revents != 0) {
-                //         num_events_remaining -= 1;
-                //         // something happened!
-                //         // log.debug("got events 0x{x}", .{pollfd.revents});
-                //         if (context.display.dispatch() != .SUCCESS) return error.DispatchFailed;
-                //         if (num_events_remaining == 0) break;
-                //     }
-                // }
                 if (pollfds[0].revents != 0) {
                     num_events_remaining -= 1;
                     if (context.display.dispatch() != .SUCCESS) return error.DispatchFailed;
@@ -140,6 +141,7 @@ pub fn frame(bw: *BasicWidgets) !void {
     const s = bw.surface;
     s.beginFrame();
     defer s.endFrame();
+    log.debug("background", .{});
     {
         const overlay = try bw.overlay(.{ .src = @src() });
         defer bw.end(overlay);

@@ -16,6 +16,7 @@ pub const c = @cImport({
     @cInclude("cairo/cairo.h");
     @cInclude("pango/pangocairo.h");
     @cInclude("time.h");
+    @cInclude("linux/input-event-codes.h");
 });
 pub const Vec2 = struct {
     x: f32 = 0,
@@ -23,8 +24,30 @@ pub const Vec2 = struct {
     pub fn in(self: *const Vec2, rect: Rect) bool {
         return (self.x >= rect.x and self.y >= rect.y) and (self.x <= (rect.x + rect.w) and self.y <= (rect.y + rect.h));
     }
+    pub fn area(self: *const Vec2) f32 {
+        return self.x * self.y;
+    }
     pub fn format(value: Vec2, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
         try writer.print("({d}, {d})", .{ value.x, value.y });
+    }
+    pub fn toRectSize(v: Vec2) Rect {
+        return Rect{ .w = v.x, .h = v.y };
+    }
+};
+pub const UVec2 = struct {
+    x: u32 = 0,
+    y: u32 = 0,
+    pub fn in(self: *const UVec2, rect: Rect) bool {
+        return (self.x >= rect.x and self.y >= rect.y) and (self.x <= (rect.x + rect.w) and self.y <= (rect.y + rect.h));
+    }
+    pub fn area(self: *const UVec2) u32 {
+        return self.x * self.y;
+    }
+    pub fn format(value: UVec2, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+        try writer.print("({}, {})", .{ value.x, value.y });
+    }
+    pub fn toRectSize(v: UVec2) Rect {
+        return Rect{ .w = @floatFromInt(v.x), .h = @floatFromInt(v.y) };
     }
 };
 pub const Rect = struct {
@@ -79,9 +102,6 @@ pub const Rect = struct {
     }
     pub fn size(self: Rect) Vec2 {
         return Vec2{ .x = self.w, .y = self.h };
-    }
-    pub fn fromSize(v: Vec2) Rect {
-        return Rect{ .w = v.x, .h = v.y };
     }
 };
 // match with PangoRectangle

@@ -12,16 +12,13 @@ const wp = wayland.client.wp;
 const cairo = @import("./cairo.zig");
 const Scheduler = @import("./Scheduler.zig");
 const Surface = @import("./Surface.zig");
-const LayerSurfaceWindow = @import("./LayerSurfaceWindow.zig");
 const common = @import("./common.zig");
 const Rect = common.Rect;
 const Vec2 = common.Vec2;
 const KeyState = common.KeyState;
 const pango = common.pango;
 const Style = common.Style;
-const c = @cImport({
-    @cInclude("linux/input-event-codes.h");
-});
+const c = common.c;
 
 display: *wl.Display,
 scheduler: Scheduler,
@@ -108,6 +105,7 @@ fn registryListener(registry: *wl.Registry, event: wl.Registry.Event, context: *
                 const wl_output = registry.bind(global.name, wl.Output, 1) catch return;
                 context.outputs.append(Output{
                     .wl_output = wl_output,
+                    .allocator = context.allocator,
                 }) catch return;
                 wl_output.setListener(*Output, Output.listener, &context.outputs.items[context.outputs.items.len - 1]);
             } else {
@@ -119,38 +117,15 @@ fn registryListener(registry: *wl.Registry, event: wl.Registry.Event, context: *
     }
 }
 
-const Output = struct {
+pub const Output = struct {
     wl_output: *wl.Output,
     width: i32 = 0,
     height: i32 = 0,
-    name: [*:0]const u8 = undefined,
+    name: [:0]const u8 = undefined,
+    allocator: std.mem.Allocator,
     fn deinit(self: *@This()) void {
         self.wl_output.deinit();
-    }
-    pub fn initLayerSurface(self: @This(), context: *Context, window: *const LayerSurfaceWindow) !Surface {
-        const display = context.display;
-        const compositor = context.compositor;
-        const layer_shell = context.layer_shell orelse return error.NoZwlrLayerShell;
-        const wl_surface = try compositor.createSurface();
-        const layer_surface = try layer_shell.getLayerSurface(wl_surface, self.wl_output, window.layer, window.namespace);
-        layer_surface.setListener(*const LayerSurfaceWindow, LayerSurfaceWindow.listener, window);
-        const width = if (window.width == 0) self.width else @as(i32, @intCast(window.width));
-        const height = if (window.height == 0) self.height else @as(i32, @intCast(window.height));
-        layer_surface.setSize(@intCast(width), @intCast(height));
-        if (window.exclusive == .ignore) {
-            layer_surface.setExclusiveZone(-1);
-        } else if (window.exclusive == .exclude) {
-            if (window.anchor.top != window.anchor.bottom) {
-                layer_surface.setExclusiveZone(@intCast(height));
-            } else if (window.anchor.left != window.anchor.right) {
-                layer_surface.setExclusiveZone(@intCast(width));
-            }
-        }
-        layer_surface.setAnchor(window.anchor);
-        _ = display;
-        // if (display.roundtrip() != .SUCCESS) return error.RoundtripFailed;
-        wl_surface.commit();
-        return Surface.fromWlSurface(context, wl_surface, @intCast(width), @intCast(height));
+        self.allocator.free(self.name);
     }
     pub fn listener(_: *wl.Output, event: wl.Output.Event, output: *Output) void {
         // log.debug("hello from Listener", .{});
@@ -160,9 +135,12 @@ const Output = struct {
                 output.width = mode.width;
                 output.height = mode.height;
             },
-            .name => |name| {
-                log.debug("Name: {s}", .{name.name});
-                output.name = name.name;
+            .name => |data| {
+                log.debug("Name: {s}", .{data.name});
+                const len = std.mem.len(data.name);
+                const buf = output.allocator.allocSentinel(u8, len, 0) catch unreachable;
+                @memcpy(buf, data.name);
+                output.name = buf;
             },
             .geometry => |data| {
                 log.debug("Geometry {}", .{data});
@@ -182,6 +160,15 @@ const Output = struct {
 };
 
 const OutputList = std.ArrayList(Output);
+
+pub fn getOutputWithName(context: *Context, name: [:0]const u8) ?*Output {
+    for (context.outputs.items) |*output| {
+        if (std.mem.eql(u8, output.name, name)) {
+            return output;
+        }
+    }
+    return null;
+}
 
 pub const Seat = struct {
     wl_seat: *wl.Seat,

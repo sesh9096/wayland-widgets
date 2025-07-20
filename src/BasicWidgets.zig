@@ -230,8 +230,11 @@ pub const Overlay = struct {
         // TODO: create an special child type to allow for placing items at specific locations
         const self = widget.getInner(@This());
         switch (action) {
-            .add => try self.children.append(child),
+            .add => {
+                try self.children.append(child);
+            },
             .updated => if (indexOfWidget(self.children, child)) |index| {
+                try widget.updated();
                 _ = index;
             } else {
                 log.err("children: {}", .{self.children.items.len});

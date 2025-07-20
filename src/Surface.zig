@@ -16,25 +16,42 @@ const common = @import("./common.zig");
 const Widget = common.Widget;
 const Rect = common.Rect;
 const Vec2 = common.Vec2;
+const UVec2 = common.UVec2;
 const Style = common.Style;
 const WidgetFromId = std.AutoHashMap(u32, *Widget);
 const WidgetList = std.ArrayList(*Widget);
 
 wl_surface: *wl.Surface,
+wl_shm: *wl.Shm,
 shared_memory: []align(std.mem.page_size) u8 = &.{},
-size: Vec2,
+size: UVec2,
 buffers: [2]Buffer,
 current_buffer: u1 = 0,
 widget: ?*Widget = null,
 widget_storage: WidgetFromId,
 allocator: std.mem.Allocator,
 seat: *Seat,
-context: *Context,
 style: Style,
+
 /// list of widgets which have been updated and need to be redrawn
 redraw_list: WidgetList,
 /// what the pointer is currently hovering over
 pointer_widget: ?*Widget = null,
+/// what the pointer has clicked on or is receiving input
+focused_widget: ?*Widget = null,
+/// reason for redraw, null indicates redraw not needed
+reason: ?Reason = null,
+
+const Reason = enum {
+    /// can be automatically redrawn with `Surface.frame`, handlers have handled all cases
+    auto,
+    /// input event which should be manually handled
+    input,
+    /// surface was resized
+    resized,
+    /// first frame
+    first,
+};
 
 const Self = @This();
 
@@ -42,26 +59,74 @@ fn deinit(self: *@This()) void {
     if (self.wl_surf) |surface| {
         surface.destroy();
     }
-    if (self.cairo_surf) |surface| {
-        surface.destroy();
-    }
-    if (self.shared_memory) |mem| {
-        std.posix.munmap(mem);
-    }
-    for (self.buffers) |buffer| {
-        buffer.deinit();
-    }
+    self.destroyBuffers();
     self.widget_storage.deinit();
     self.redraw_list.deinit();
 }
 
-pub fn fromWlSurface(context: *Context, wl_surface: *wl.Surface, width: i32, height: i32) !Self {
-    const allocator = context.allocator;
-    const shm = context.shm;
+/// Note: Prefer not to use directly, use configure instead
+fn fromWlSurface(
+    allocator: std.mem.Allocator,
+    wl_shm: *wl.Shm,
+    seat: *Context.Seat,
+    wl_surface: *wl.Surface,
+) Self {
+    return Self{
+        .wl_surface = wl_surface,
+        .wl_shm = wl_shm,
+        .size = undefined,
+        .widget_storage = WidgetFromId.init(allocator),
+        .redraw_list = WidgetList.init(allocator),
+        .allocator = allocator,
+        .seat = seat,
+        .style = Style.default_style,
+        .buffers = undefined,
+    };
+    // const buffer = try shm_pool.createBuffer(0, width, height, width * 4, .xrgb8888);
+}
+// pub fn requestResize(_: *Self) !void {}
+
+pub fn configureWithSize(
+    self: *Self,
+    allocator: std.mem.Allocator,
+    wl_shm: *wl.Shm,
+    seat: *Context.Seat,
+    wl_surface: *wl.Surface,
+    width: i32,
+    height: i32,
+) !void {
+    self.configureWithoutSize(self, allocator, wl_shm, seat, wl_surface);
+    self.resize(width, height);
+}
+pub fn configure(
+    self: *Self,
+    allocator: std.mem.Allocator,
+    wl_shm: *wl.Shm,
+    seat: *Context.Seat,
+    wl_surface: *wl.Surface,
+) !void {
+    self.* = fromWlSurface(allocator, wl_shm, seat, wl_surface);
+    self.wl_surface.setListener(*Self, surfaceListener, self);
+    try self.seat.registerSurface(self);
+}
+
+pub fn resize(self: *Self, width: i32, height: i32) !void {
+    // if are resizing to the same size, we don't need to do anything
+    if (self.size.x == width and self.size.y == height) return;
+    if (self.shared_memory.len != 0) {
+        try self.destroyBuffers();
+    }
+    // if we have no area, we do not need buffers
+    self.size = .{ .x = @intCast(width), .y = @intCast(height) };
+    if (width * height <= 0) return;
+
+    const cairo_format = .ARGB32;
+    const stride = cairo.formatStrideForWidth(cairo_format, width);
+    const buffer_size = stride * height;
+    const shm_len = buffer_size * 2; // we need 2 surfaces for double buffering
+
     const shm_fd = try std.posix.memfd_create("shared_memory_buffer", 0);
     defer std.posix.close(shm_fd);
-    const buffer_size = 4 * width * height;
-    const shm_len = buffer_size * 2; // we need 2 surfaces for double buffering
     const pool = try std.posix.mmap(
         null,
         @intCast(shm_len),
@@ -71,47 +136,41 @@ pub fn fromWlSurface(context: *Context, wl_surface: *wl.Surface, width: i32, hei
         0,
     );
     try std.posix.ftruncate(shm_fd, @intCast(shm_len));
-    const shm_pool = try shm.createPool(shm_fd, shm_len);
+
+    const shm_pool = try self.wl_shm.createPool(shm_fd, shm_len);
     defer shm_pool.destroy();
 
     // const cairo_surf = cairo.Surface.createForData(pool.ptr, .ARGB32, width, height, width * 4);
-    const cairo_surf0 = cairo.Surface.createForData(pool.ptr, .ARGB32, width, height, cairo.formatStrideForWidth(.ARGB32, width));
-    const cairo_surf1 = cairo.Surface.createForData(pool.ptr + @as(usize, @intCast(buffer_size)), .ARGB32, width, height, cairo.formatStrideForWidth(.ARGB32, width));
-    return Self{
-        .wl_surface = wl_surface,
-        .context = context,
-        .size = .{ .x = @floatFromInt(width), .y = @floatFromInt(height) },
-        .shared_memory = pool,
-        .widget_storage = WidgetFromId.init(allocator),
-        .redraw_list = WidgetList.init(allocator),
-        .allocator = allocator,
-        .seat = &context.seat,
-        .style = Style.default_style,
-        .buffers = .{
-            Buffer{
-                .wl_buffer = try shm_pool.createBuffer(0, width, height, width * 4, .argb8888),
-                .shared_memory = pool[0..@intCast(buffer_size)],
-                .cairo_surf = cairo_surf0,
-                .cairo_context = cairo.Context.create(cairo_surf0),
-            },
-            Buffer{
-                .wl_buffer = try shm_pool.createBuffer(buffer_size, width, height, width * 4, .argb8888),
-                .shared_memory = pool[@intCast(buffer_size)..],
-                .cairo_surf = cairo_surf1,
-                .cairo_context = cairo.Context.create(cairo_surf1),
-            },
+    // indicates there is a previously sized surface
+    const cairo_surf0 = cairo.Surface.createForData(pool.ptr, cairo_format, width, height, stride);
+    const cairo_surf1 = cairo.Surface.createForData(pool.ptr + @as(usize, @intCast(buffer_size)), cairo_format, width, height, stride);
+    self.buffers = .{
+        .{
+            .wl_buffer = try shm_pool.createBuffer(0, width, height, stride, .argb8888),
+            .shared_memory = pool[0..@intCast(buffer_size)],
+            .cairo_surf = cairo_surf0,
+            .cairo_context = cairo.Context.create(cairo_surf0),
+        },
+        .{
+            .wl_buffer = try shm_pool.createBuffer(buffer_size, width, height, stride, .argb8888),
+            .shared_memory = pool[@intCast(buffer_size)..],
+            .cairo_surf = cairo_surf1,
+            .cairo_context = cairo.Context.create(cairo_surf1),
         },
     };
-    // const buffer = try shm_pool.createBuffer(0, width, height, width * 4, .xrgb8888);
+    self.buffers[0].setListener();
+    self.buffers[1].setListener();
+    self.shared_memory = pool;
+}
+pub fn destroyBuffers(self: *Self) !void {
+    for (&self.buffers) |*buffer| {
+        buffer.deinit();
+    }
+    std.posix.munmap(self.shared_memory);
+    self.shared_memory = &.{};
+    self.current_buffer = 0;
 }
 
-/// set listeners
-pub fn setListeners(self: *Self) !void {
-    self.buffers[0].wl_buffer.setListener(*Buffer, Buffer.bufferListener, &self.buffers[0]);
-    self.buffers[1].wl_buffer.setListener(*Buffer, Buffer.bufferListener, &self.buffers[1]);
-    self.wl_surface.setListener(*Self, surfaceListener, self);
-    try self.seat.registerSurface(self);
-}
 pub fn notify(self: *Self, event: anytype) void {
     const eventType = @TypeOf(event);
     if (eventType == wl.Pointer.Event) {}
@@ -211,7 +270,7 @@ pub fn endFrame(self: *Self) void {
         // Rect{ .w = @floatFromInt(self.width), .h = @floatFromInt(self.height) }
         // log.debug("drawing {*}", .{widget});
         widget.in_frame = false;
-        widget.draw(if (widget == self.widget) Rect.fromSize(self.size) else widget.rect) catch {};
+        widget.draw(if (widget == self.widget) self.size.toRectSize() else widget.rect) catch {};
         self.wl_surface.damage(
             @intFromFloat(widget.rect.x),
             @intFromFloat(widget.rect.y),
@@ -298,7 +357,7 @@ const Buffer = struct {
     cairo_context: *cairo.Context,
     shared_memory: []u8,
     usable: bool = true,
-    pub fn bufferListener(_: *wl.Buffer, event: wl.Buffer.Event, buffer: *Buffer) void {
+    pub fn listener(_: *wl.Buffer, event: wl.Buffer.Event, buffer: *Buffer) void {
         _ = event; // the only event is release
         buffer.usable = true;
         // log.debug("{} Release {*}", .{ @mod(std.time.milliTimestamp(), 60000), buffer });
@@ -307,5 +366,8 @@ const Buffer = struct {
         self.wl_buffer.destroy();
         self.cairo_surf.destroy();
         self.cairo_context.destroy();
+    }
+    pub fn setListener(self: *Buffer) void {
+        self.wl_buffer.setListener(*Buffer, Buffer.listener, self);
     }
 };

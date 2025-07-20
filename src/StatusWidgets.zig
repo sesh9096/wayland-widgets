@@ -351,7 +351,7 @@ pub const Disk = struct {
 };
 
 fn writeSize(size: u64, writer: anytype) !void {
-    assert(size != 0);
+    if (size == 0) return writer.print("0B", .{});
     const log2: u6 = @intCast(64 - 1 - @clz(size));
     const log1024 = log2 / 10;
     const unit: u8 = switch (log1024) {
