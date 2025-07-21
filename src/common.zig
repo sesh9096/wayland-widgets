@@ -179,7 +179,7 @@ pub const IdGenerator = struct {
     type_hash: ?u32 = null,
     /// Generally set by a widget creator so avoid using in high level calls.
     /// If other fields are set, we will avoid using this as part of seed.
-    parent: ?*Widget = null,
+    parent: ?Widget = null,
     /// Generally set by a widget creator so avoid using in high level calls.
     /// If other fields are set, we will avoid using this as part of seed.
     ptr: ?*anyopaque = null,

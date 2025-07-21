@@ -131,7 +131,7 @@ pub fn FormatWidget(T: type) type {
 const TimeWidget = struct {
     fmt: [:0]const u8,
     buffer_list: CacheItem,
-    widget: *Widget,
+    widget: *BasicWidgets.Label,
     id: u32,
     pub fn update(self: *TimeWidget) !void {
         const time_struct = c.localtime(&@intCast(timestamp));
@@ -143,7 +143,7 @@ const TimeWidget = struct {
                 try al.ensureTotalCapacity(3 * al.capacity / 2 + 8);
             } else {
                 al.items.len = len;
-                try BasicWidgets.Label.configure(self.widget, @ptrCast(al.items));
+                try self.widget.configure(@ptrCast(al.items));
                 return;
             }
         }
@@ -226,7 +226,7 @@ pub const Battery = struct {
     }
 };
 
-pub fn getBattery(self: *Self, fmt: [:0]const u8, id_gen_base: IdGenerator) !*Widget {
+pub fn getBattery(self: *Self, fmt: [:0]const u8, id_gen_base: IdGenerator) !*BasicWidgets.Label {
     // const capacity_file = try std.fs.openFileAbsolute("/sys/class/power_supply/BAT0/capacity", .{});
     const batteries = self.batteries.items;
     const bat = if (batteries.len > 0) batteries[0] else return error.BatteryNotFound;
@@ -298,7 +298,7 @@ pub const MemInfo = struct {
 };
 pub var meminfo = MemInfo{};
 
-pub fn getMem(self: *Self, fmt: [:0]const u8, id_gen_base: IdGenerator) !*Widget {
+pub fn getMem(self: *Self, fmt: [:0]const u8, id_gen_base: IdGenerator) !*BasicWidgets.Label {
     try meminfo.update();
     const id_gen = id_gen_base.add(.{ .type_hash = typeHash(MemInfo), .str = fmt });
     var al = try self.getArrayList(id_gen);
@@ -311,7 +311,7 @@ pub fn mem(self: *Self, fmt: [:0]const u8, id_gen: IdGenerator) !void {
     try self.surface.addWidget(widget);
 }
 
-pub fn getDisk(self: *Self, path: [*:0]const u8, fmt: [:0]const u8, id_gen_base: IdGenerator) !*Widget {
+pub fn getDisk(self: *Self, path: [*:0]const u8, fmt: [:0]const u8, id_gen_base: IdGenerator) !*BasicWidgets.Label {
     var stats: Statvfs = undefined;
     try statvfsWithError(path, &stats);
     const avail_size = stats.f_bsize * stats.f_bavail;

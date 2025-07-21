@@ -8,80 +8,79 @@ const cairo = common.cairo;
 const Rect = common.Rect;
 const Vec2 = common.Vec2;
 const Style = common.Style;
-const Button = @This();
+const Self = @This();
 
-child: ?*Widget,
+md: Widget.Metadata,
+child: ?Widget,
 clicked: bool = false,
-pub fn configure(self: *Button) void {
+pub fn configure(self: *Self) void {
     self.child = null;
 }
-fn draw(widget: *Widget) !void {
+fn draw(self: *Self) !void {
     // draw itself
     // const cr = surface.getCairoContext();
-    const rect = widget.drawDecorationAdjustSize();
-    if (widget.getInner(@This()).child) |child| {
+    const rect = self.md.drawDecorationAdjustSize();
+    if (self.child) |child| {
         try child.draw(rect);
     }
 }
-pub fn childAction(widget: *Widget, action: Widget.Action, child: *Widget) !void {
+pub fn childAction(self: *Self, action: Widget.Action, child: Widget) !void {
     // log.debug("adding child", .{});
-    const button = widget.getInner(@This());
     switch (action) {
         .add => {
-            if (button.child) |_| {
+            if (self.child) |_| {
                 return error.InvalidChild;
-            } else button.child = child;
+            } else self.child = child;
         },
-        .clear => button.child = null,
+        .clear => self.child = null,
         .remove => {
-            if (button.child == child) {
-                button.child = null;
+            if (std.meta.eql(self.child, @as(?Widget, child))) {
+                self.child = null;
             } else {
                 return error.InvalidChild;
             }
         },
         .updated => {
-            try widget.parent.?.vtable.childAction(widget.parent.?, .updated, widget);
+            try self.md.updated(self);
         },
     }
 }
-pub fn getChildren(widget: *Widget) []*Widget {
+pub fn getChildren(self: *Self) []Widget {
     // don't try to dereference this
-    if (widget.getInner(@This()).child) |*child_ptr| {
+    if (self.child) |*child| {
         // var ret: []*Widget = undefined;
         // ret.ptr = child_ptr;
-        return child_ptr[0..1];
+        return child[0..1];
     } else {
-        var ret: []*Widget = undefined;
-        return ret[0..0];
+        return &.{};
     }
 }
-pub fn handleInput(widget: *Widget) !void {
-    const surface = widget.surface;
-    const button = widget.getInner(@This());
+pub fn handleInput(self: *Self) !void {
+    const surface = self.md.surface;
     if (surface.getPointer()) |pointer| {
         // pointer events possible
-        if (!pointer.handled and pointer.in(widget.rect)) {
+        if (!pointer.handled and pointer.in(self.md.rect)) {
             pointer.setShape(.pointer);
             if (pointer.button == .left and pointer.state == .released) {
-                button.clicked = true;
+                self.clicked = true;
             } else {
-                button.clicked = false;
+                self.clicked = false;
             }
             pointer.handled = true;
         } else {
-            button.clicked = false;
+            self.clicked = false;
         }
     }
 }
-pub fn proposeSize(widget: *Widget) void {
-    if (widget.getInner(@This()).child) |child| {
-        child.vtable.proposeSize(child);
-        widget.rect.w = child.rect.w;
-        widget.rect.h = child.rect.h;
+pub fn proposeSize(self: *Self, rect: *Rect) void {
+    if (self.child) |child| {
+        const child_rect = &child.getMetadata().rect;
+        child.vtable.proposeSize(child.ptr, child_rect);
+        rect.w = child_rect.w;
+        rect.h = child_rect.h;
     } else {
-        widget.rect.w = 1;
-        widget.rect.h = 1;
+        rect.w = 1;
+        rect.h = 1;
     }
 }
 pub const default_style = Style{
@@ -89,10 +88,4 @@ pub const default_style = Style{
     .items = &.{ .{ .border_radius = 4 }, .{ .border_width = 1 } },
 };
 pub var style = &default_style;
-pub const vtable = Widget.Vtable{
-    .childAction = childAction,
-    .getChildren = getChildren,
-    .draw = draw,
-    .handleInput = handleInput,
-    .proposeSize = proposeSize,
-};
+pub const vtable = Widget.Vtable.forType(Self);

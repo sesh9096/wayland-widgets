@@ -8,7 +8,9 @@ const Widget = common.Widget;
 const cairo = common.cairo;
 const pango = common.pango;
 const Rect = common.Rect;
+const Self = @This();
 
+md: Widget.Metadata,
 text: [:0]const u8,
 hash: u32,
 // glyphs: *pango.GlyphString,
@@ -16,47 +18,43 @@ layout: *pango.Layout,
 // pub fn init(self: *@This(), _: std.mem.Allocator) void {
 //     // self.glyphs = pango.GlyphString.new();
 // }
-pub fn init(widget: *Widget) void {
-    const self = widget.getInner(@This());
-    const cr = widget.surface.getCairoContext();
+pub fn init(self: *Self) void {
+    const cr = self.md.surface.getCairoContext();
     self.layout = pango.PangoCairo.createLayout(cr);
 }
-pub fn configure(widget: *Widget, text: [:0]const u8) !void {
-    const self = widget.getInner(@This());
+pub fn configure(self: *Self, text: [:0]const u8) !void {
     self.text = text;
     const layout = self.layout;
     const hash = common.hash(text);
     if (self.hash != hash) {
-        const font_description = widget.style.getAttribute(.default_font).describe();
+        const font_description = self.md.style.getAttribute(.default_font).describe();
         layout.setFontDescription(font_description);
         layout.setText(text, @intCast(text.len));
-        try widget.updated();
+        try self.md.updated(self);
     }
 }
-pub fn draw(widget: *Widget) !void {
-    const surface = widget.surface;
+pub fn draw(self: *Self) !void {
+    const surface = self.md.surface;
     const cr = surface.getCairoContext();
-    const rect = widget.drawDecorationAdjustSize();
-    const label = widget.getInner(@This());
+    const rect = self.md.drawDecorationAdjustSize();
     // defer label.layout.free();
 
     cr.setSourceRgb(1, 1, 1);
     cr.moveTo(rect.x, rect.y);
     cr.setLineWidth(1);
-    pango.PangoCairo.showLayout(cr, label.layout);
+    pango.PangoCairo.showLayout(cr, self.layout);
 
     // pango.PangoCairo.showGlyphString(cr, font, label.glyphs);
     // log.debug("{}", .{widget.rect});
     // log.debug("Drawing text {s} at {} {}", .{ label.text, rect.x, rect.y });
 }
 
-pub fn proposeSize(widget: *Widget) void {
-    const label = widget.getInner(@This());
-    const layout = label.layout;
-    var rect: common.IRect = undefined;
-    _ = layout.getPixelExtents(null, &rect);
-    rect.w += 10; // why????
-    widget.rect = rect.toRect();
+pub fn proposeSize(self: *Self, rect: *Rect) void {
+    const layout = self.layout;
+    var irect: common.IRect = undefined;
+    _ = layout.getPixelExtents(null, &irect);
+    irect.w += 10; // why????
+    rect.* = irect.toRect();
 
     // const attr_list = pango.AttrList.new();
     // defer attr_list.unref();
@@ -70,7 +68,4 @@ pub fn proposeSize(widget: *Widget) void {
     // label.glyphs.extents(font, null, &rect);
 }
 
-pub const vtable = Widget.Vtable{
-    .draw = draw,
-    .proposeSize = proposeSize,
-};
+pub const vtable = Widget.Vtable.forType(Self);

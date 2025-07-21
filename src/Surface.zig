@@ -18,8 +18,8 @@ const Rect = common.Rect;
 const Vec2 = common.Vec2;
 const UVec2 = common.UVec2;
 const Style = common.Style;
-const WidgetFromId = std.AutoHashMap(u32, *Widget);
-const WidgetList = std.ArrayList(*Widget);
+const WidgetFromId = std.AutoHashMap(u32, *anyopaque);
+const WidgetList = std.ArrayList(Widget);
 
 wl_surface: *wl.Surface,
 wl_shm: *wl.Shm,
@@ -27,7 +27,7 @@ shared_memory: []align(std.mem.page_size) u8 = &.{},
 size: UVec2,
 buffers: [2]Buffer,
 current_buffer: u1 = 0,
-widget: ?*Widget = null,
+widget: ?Widget = null,
 widget_storage: WidgetFromId,
 allocator: std.mem.Allocator,
 seat: *Seat,
@@ -36,9 +36,9 @@ style: Style,
 /// list of widgets which have been updated and need to be redrawn
 redraw_list: WidgetList,
 /// what the pointer is currently hovering over
-pointer_widget: ?*Widget = null,
+pointer_widget: ?Widget = null,
 /// what the pointer has clicked on or is receiving input
-focused_widget: ?*Widget = null,
+focused_widget: ?Widget = null,
 /// reason for redraw, null indicates redraw not needed
 reason: ?Reason = null,
 
@@ -181,14 +181,14 @@ pub fn getPointer(self: *Self) ?*Seat.Pointer {
     return if (pointer.surface == self) pointer else null;
 }
 
-pub fn getDeepestWidgetAtPoint(self: *Self, point: Vec2) ?*Widget {
+pub fn getDeepestWidgetAtPoint(self: *Self, point: Vec2) ?Widget {
     if (self.widget) |initial_widget| {
         var widget = initial_widget;
         outer: for (1..1000) |_| { // No Infinite Loops
-            const children = widget.vtable.getChildren(widget);
+            const children = widget.vtable.getChildren(widget.ptr);
             for (0..children.len) |from_end| {
                 const i = children.len - from_end - 1;
-                if (point.in(children[i].rect)) {
+                if (point.in(children[i].getMetadata().rect)) {
                     widget = children[i];
                     continue :outer;
                 }
@@ -206,20 +206,20 @@ pub fn handleInputs(self: *Self) void {
     self.seat.reset();
     if (self.getPointer()) |pointer| {
         if (self.getDeepestWidgetAtPoint(pointer.pos)) |widget_initial| {
-            var widget_opt: ?*Widget = widget_initial;
+            var widget_opt: ?Widget = widget_initial;
             while (widget_opt) |widget| {
-                widget.vtable.handleInput(widget) catch {};
+                widget.vtable.handleInput(widget.ptr) catch {};
                 if (pointer.handled) {
                     break;
                 } else {
-                    widget_opt = widget.parent;
+                    widget_opt = widget.getMetadata().parent;
                 }
             } else {
                 pointer.setShape(.default);
             }
             if (self.pointer_widget) |prev| {
                 // we have already handled in this case
-                if (prev != widget_opt) prev.vtable.handleInput(prev) catch {};
+                if (widget_opt == null or !std.meta.eql(prev, widget_opt.?)) prev.vtable.handleInput(prev.ptr) catch {};
             }
             self.pointer_widget = widget_opt;
         }
@@ -266,16 +266,18 @@ pub fn endFrame(self: *Self) void {
     //     widget.vtable.proposeSize(widget);
     //     widget.draw(Rect{ .w = @floatFromInt(self.width), .h = @floatFromInt(self.height) }) catch {};
     // }
+    if (self.widget == null) return;
     for (self.redraw_list.items) |widget| {
         // Rect{ .w = @floatFromInt(self.width), .h = @floatFromInt(self.height) }
         // log.debug("drawing {*}", .{widget});
-        widget.in_frame = false;
-        widget.draw(if (widget == self.widget) self.size.toRectSize() else widget.rect) catch {};
+        const md = widget.getMetadata();
+        md.in_frame = false;
+        widget.draw(if (std.meta.eql(widget, self.widget.?)) self.size.toRectSize() else md.rect) catch {};
         self.wl_surface.damage(
-            @intFromFloat(widget.rect.x),
-            @intFromFloat(widget.rect.y),
-            @intFromFloat(widget.rect.x + widget.rect.w),
-            @intFromFloat(widget.rect.y + widget.rect.h),
+            @intFromFloat(md.rect.x),
+            @intFromFloat(md.rect.y),
+            @intFromFloat(md.rect.w),
+            @intFromFloat(md.rect.h),
         );
         //self.wl_surface.damage( 0, 0, math.maxInt(@TypeOf(self.width)), math.maxInt(@TypeOf(self.height)));
     }
@@ -286,14 +288,14 @@ pub fn endFrame(self: *Self) void {
 }
 
 /// make it so subsequent widgets will be appended to the widget's parent
-pub fn end(self: *Self, widget: *Widget) void {
-    assert(widget == self.widget);
-    if (widget.parent) |parent| {
+pub fn end(self: *Self, widget: Widget) void {
+    assert(std.meta.eql(@as(?Widget, widget), self.widget));
+    if (widget.getMetadata().parent) |parent| {
         self.widget = parent;
     } else {
         // we are redrawing everything
         self.redraw_list.clearRetainingCapacity();
-        self.redraw_list.append(widget);
+        self.redraw_list.append(widget) catch unreachable;
     }
 }
 /// convenience function to draw a frame
@@ -309,39 +311,43 @@ pub fn changed(self: *Self) bool {
 
 /// Add widget as a child of the current widget.
 /// Use this if the widget will have no children and subsequent widgets should be added to the parent.
-pub fn addWidget(self: *const Self, widget: *Widget) !void {
+pub fn addWidget(self: *const Self, widget: anytype) !void {
+    const wid = if (@TypeOf(widget) == Widget) widget else Widget.from(widget);
+    const md = wid.getMetadata();
     if (self.widget) |parent| {
-        widget.parent = parent;
-        try parent.addChild(widget);
+        md.parent = parent;
+        try parent.addChild(wid);
     } else {
-        widget.parent = null;
+        md.parent = null;
     }
 }
 /// Add widget as a child of the current widget and then make it the current widget.
 /// Use this if you wish to add children to the widget.
-pub fn addWidgetSetCurrent(self: *const Self, widget: *Widget) !void {
+pub fn addWidgetSetCurrent(self: *Self, widget: anytype) !void {
     try self.addWidget(widget);
     self.setCurrent(widget);
 }
 
-pub fn setCurrent(self: *const Self, widget: *Widget) void {
-    self.widget = widget;
+pub fn setCurrent(self: *Self, widget: anytype) void {
+    const wid = if (@TypeOf(widget) == Widget) Widget else Widget.from(widget);
+    self.widget = wid;
 }
 
-pub fn getWidget(self: *Self, id_gen: common.IdGenerator, T: type) !*Widget {
+pub fn getWidget(self: *Self, id_gen: common.IdGenerator, T: type) !*T {
     const id = id_gen.toId();
     const get_or_put_res = try self.widget_storage.getOrPut(id);
-    const widget = if (get_or_put_res.found_existing) get_or_put_res.value_ptr.* else blk: {
-        const wid = try Widget.createWidget(self, T);
+    const ptr: *T = if (get_or_put_res.found_existing) @alignCast(@ptrCast(get_or_put_res.value_ptr.*)) else blk: {
+        const wid = try Widget.initWidget(self, T);
         // log.debug("Created {s} widget with id {x} at {*}", .{ @typeName(T), id, wid });
         get_or_put_res.value_ptr.* = wid;
         break :blk wid;
     };
     // check that the widget has not already been used elsewhere in frame
     // log.debug("Created {s} widget with id {x}", .{ @typeName(T), id });
-    if (widget.in_frame) return error.DuplicateId;
-    widget.in_frame = true;
-    return widget;
+    const widget = Widget.from(ptr);
+    if (widget.getMetadata().in_frame) return error.DuplicateId;
+    widget.getMetadata().in_frame = true;
+    return ptr;
 }
 
 pub fn surfaceListener(_: *wl.Surface, event: wl.Surface.Event, surface: *Self) void {

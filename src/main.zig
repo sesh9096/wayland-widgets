@@ -144,14 +144,14 @@ pub fn frame(bw: *BasicWidgets) !void {
     log.debug("background", .{});
     {
         const overlay = try bw.overlay(.{ .src = @src() });
-        defer bw.end(overlay);
+        defer overlay.end();
         try bw.image("/home/ss/pictures/draw/experiment.png", .stretch, .{ .src = @src() });
         const main_layout = try bw.column(.{ .src = @src() });
-        defer bw.end(main_layout);
+        defer main_layout.end();
         const innerbox = try bw.row(.{ .src = @src() });
-        bw.end(innerbox);
+        innerbox.end();
         const innerbox1 = try bw.row(.{ .src = @src() });
-        bw.end(innerbox1);
+        innerbox1.end();
         try bw.text("Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.", .{ .src = @src() });
         if (s.getPointer()) |pointer| {
             const coords = std.fmt.bufPrintZ(&buf, "({[x]d:.2},{[y]d:.2})", pointer.pos) catch unreachable;
@@ -178,7 +178,7 @@ fn drawBar(sw: *StatusWidgets) !void {
     defer s.endFrame();
     {
         const box = try bw.row(.{ .src = @src() });
-        defer bw.end(box);
+        defer box.end();
         try sw.time("%I:%M %p %a %b %d,%Y", .{ .src = @src() });
         try sw.battery(" {percentage}% {status}", .{ .src = @src() });
         try sw.disk("/home/ss", "{used} {free} {total}", .{ .src = @src() });

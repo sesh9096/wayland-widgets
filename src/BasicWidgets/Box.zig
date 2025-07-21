@@ -12,44 +12,43 @@ const Expand = common.Expand;
 const BasicWidgets = @import("../BasicWidgets.zig");
 const WidgetList = BasicWidgets.WidgetList;
 const indexOfWidget = BasicWidgets.indexOfWidget;
-const Box = @This();
+const Self = @This();
 
+md: Widget.Metadata,
 direction: Direction = .right,
 expand: Expand,
 children: WidgetList,
-pub fn init(widget: *Widget) void {
-    const self = widget.getInner(@This());
-    self.children = WidgetList.init(widget.surface.allocator);
+pub fn init(self: *Self) void {
+    self.children = WidgetList.init(self.md.surface.allocator);
 }
-pub fn configure(self: *Box, direction: Direction, expand: Expand) void {
+pub fn configure(self: *Self, direction: Direction, expand: Expand) void {
     self.expand = expand;
     self.direction = direction;
 }
 
-pub fn childAction(widget: *Widget, action: Widget.Action, child: *Widget) !void {
+pub fn childAction(self: *Self, action: Widget.Action, child: Widget) !void {
     // log.debug("adding child", .{});
-    const box = widget.getInner(@This());
     switch (action) {
         .add => {
-            try box.children.append(child);
-            try widget.updated();
+            try self.children.append(child);
+            try self.md.updated(self);
         },
         .clear => {
-            for (box.children.items) |chld| {
-                chld.parent = null;
+            for (self.children.items) |chld| {
+                chld.getMetadata().parent = null;
             }
-            box.children.items.len = 0;
+            self.children.items.len = 0;
         },
         .remove => {
-            if (indexOfWidget(box.children, child)) |index| {
-                _ = box.children.orderedRemove(index);
+            if (indexOfWidget(self.children, child)) |index| {
+                _ = self.children.orderedRemove(index);
             } else {
                 return error.InvalidChild;
             }
         },
         .updated => {
-            if (indexOfWidget(box.children, child)) |index| {
-                try widget.updated();
+            if (indexOfWidget(self.children, child)) |index| {
+                try self.md.updated(self);
                 _ = index;
             } else {
                 return error.InvalidChild;
@@ -60,92 +59,93 @@ pub fn childAction(widget: *Widget, action: Widget.Action, child: *Widget) !void
         // },
     }
 }
-pub fn getChildren(widget: *Widget) []*Widget {
-    return widget.getInner(@This()).children.items;
+pub fn getChildren(self: *Self) []Widget {
+    return self.children.items;
 }
-pub fn proposeSize(widget: *Widget) void {
+pub fn proposeSize(self: *Self, rect: *Rect) void {
     // TODO: iterate
-    const box = widget.getInner(@This());
-    switch (box.direction) {
+    switch (self.direction) {
         .left, .right => {
             var w: f32 = 0;
             var h: f32 = 0;
-            for (box.children.items) |child| {
-                child.vtable.proposeSize(child);
-                w += child.rect.w;
-                h = @max(h, child.rect.h);
+            for (self.children.items) |child| {
+                const md = child.getMetadata();
+                child.vtable.proposeSize(child.ptr, &md.rect);
+                w += md.rect.w;
+                h = @max(h, md.rect.h);
             }
-            widget.rect.h = h;
-            widget.rect.w = w;
+            rect.h = h;
+            rect.w = w;
         },
         .down, .up => {
             var w: f32 = 0;
             var h: f32 = 0;
-            for (box.children.items) |child| {
-                child.vtable.proposeSize(child);
-                w = @max(w, child.rect.w);
-                h += child.rect.h;
+            for (self.children.items) |child| {
+                const md = child.getMetadata();
+                child.vtable.proposeSize(child.ptr, &md.rect);
+                w = @max(w, md.rect.w);
+                h += md.rect.h;
             }
-            widget.rect.h = h;
-            widget.rect.w = w;
+            rect.h = h;
+            rect.w = w;
         },
     }
 }
-pub fn draw(widget: *Widget) !void {
+pub fn draw(self: *Self) !void {
     // draw itself
     // const cr = surface.getCairoContext();
     // draw children
-    var rect = widget.drawDecorationAdjustSize();
-    const box = widget.getInner(@This());
-    const hexpand = box.expand.horizontal();
-    const vexpand = box.expand.vertical();
-    switch (box.direction) {
+    const md = self.md;
+    var rect = md.drawDecorationAdjustSize();
+    const hexpand = self.expand.horizontal();
+    const vexpand = self.expand.vertical();
+    switch (self.direction) {
         .left, .right => {
             var min_width: f32 = 0;
             var total_weight: f32 = 0;
-            for (box.children.items) |child| {
-                if (child.rect.w == 0) {
+            for (self.children.items) |child| {
+                if (child.getMetadata().rect.w == 0) {
                     total_weight += 1;
                 } else {
-                    min_width += child.rect.w;
+                    min_width += child.getMetadata().rect.w;
                 }
             }
             const remaining_space = rect.w - min_width;
             rect.w = 0;
             const scale = remaining_space / total_weight;
             // expand items
-            for (box.children.items) |child| {
+            for (self.children.items) |child| {
                 const weight = 1;
+                const child_width = child.getMetadata().rect.w;
                 rect.x = rect.x + rect.w;
-                rect.w = if (hexpand or child.rect.w == 0) scale * weight else child.rect.w;
+                rect.w = if (hexpand or child_width == 0) scale * weight else child_width;
                 try child.draw(rect);
             }
         },
         .up, .down => {
             var min_width: f32 = 0;
             var total_weight: f32 = 0;
-            for (box.children.items) |child| {
-                if (child.rect.h == 0) {
+            for (self.children.items) |child| {
+                if (child.getMetadata().rect.h == 0) {
                     total_weight += 1;
                 } else {
-                    min_width += child.rect.h;
+                    min_width += child.getMetadata().rect.h;
                 }
             }
             const remaining_space = rect.h - min_width;
             rect.h = 0;
             const scale = remaining_space / total_weight;
-            for (box.children.items) |child| {
+            for (self.children.items) |child| {
                 const weight = 1;
+                const child_height = child.getMetadata().rect.h;
                 rect.y = rect.y + rect.h;
-                rect.h = if (vexpand or child.rect.h == 0) scale * weight else child.rect.h;
+                rect.h = if (vexpand or child_height == 0) scale * weight else child_height;
                 try child.draw(rect);
             }
         },
     }
 }
-pub const vtable = Widget.Vtable{
-    .childAction = childAction,
-    .getChildren = getChildren,
-    .draw = draw,
-    .proposeSize = proposeSize,
-};
+pub fn end(self: *Self) void {
+    self.md.surface.end(Widget.from(self));
+}
+pub const vtable = Widget.Vtable.forType(Self);
