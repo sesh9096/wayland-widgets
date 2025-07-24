@@ -234,7 +234,7 @@ pub const Overlay = struct {
                 try self.children.append(child);
             },
             .updated => if (indexOfWidget(self.children, child)) |index| {
-                try self.md.updated(self);
+                try Widget.updated(self);
                 _ = index;
             } else {
                 log.err("children: {}", .{self.children.items.len});

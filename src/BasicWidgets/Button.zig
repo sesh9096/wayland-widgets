@@ -41,7 +41,7 @@ pub fn childAction(self: *Self, action: Widget.Action, child: Widget) !void {
             }
         },
         .updated => {
-            try self.md.updated(self);
+            try Widget.updated(self);
         },
     }
 }

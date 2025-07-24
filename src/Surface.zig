@@ -219,7 +219,7 @@ pub fn handleInputs(self: *Self) void {
             }
             if (self.pointer_widget) |prev| {
                 // we have already handled in this case
-                if (widget_opt == null or !std.meta.eql(prev, widget_opt.?)) prev.vtable.handleInput(prev.ptr) catch {};
+                if (!std.meta.eql(@as(?Widget, prev), widget_opt)) prev.vtable.handleInput(prev.ptr) catch {};
             }
             self.pointer_widget = widget_opt;
         }
@@ -312,7 +312,7 @@ pub fn changed(self: *Self) bool {
 /// Add widget as a child of the current widget.
 /// Use this if the widget will have no children and subsequent widgets should be added to the parent.
 pub fn addWidget(self: *const Self, widget: anytype) !void {
-    const wid = if (@TypeOf(widget) == Widget) widget else Widget.from(widget);
+    const wid: Widget = if (@TypeOf(widget) == Widget) widget else Widget.from(widget);
     const md = wid.getMetadata();
     if (self.widget) |parent| {
         md.parent = parent;
@@ -329,7 +329,7 @@ pub fn addWidgetSetCurrent(self: *Self, widget: anytype) !void {
 }
 
 pub fn setCurrent(self: *Self, widget: anytype) void {
-    const wid = if (@TypeOf(widget) == Widget) Widget else Widget.from(widget);
+    const wid: Widget = if (@TypeOf(widget) == Widget) Widget else Widget.from(widget);
     self.widget = wid;
 }
 

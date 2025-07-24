@@ -25,7 +25,7 @@ pub fn configure(self: *Self, text: [:0]const u8) !void {
         const font_description = self.md.style.getAttribute(.default_font).describe();
         layout.setFontDescription(font_description);
         layout.setText(text, @intCast(text.len));
-        try self.md.updated(self);
+        try Widget.updated(self);
     }
 }
 

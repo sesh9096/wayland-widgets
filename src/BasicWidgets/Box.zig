@@ -31,7 +31,7 @@ pub fn childAction(self: *Self, action: Widget.Action, child: Widget) !void {
     switch (action) {
         .add => {
             try self.children.append(child);
-            try self.md.updated(self);
+            try Widget.updated(self);
         },
         .clear => {
             for (self.children.items) |chld| {
@@ -48,7 +48,7 @@ pub fn childAction(self: *Self, action: Widget.Action, child: Widget) !void {
         },
         .updated => {
             if (indexOfWidget(self.children, child)) |index| {
-                try self.md.updated(self);
+                try Widget.updated(self);
                 _ = index;
             } else {
                 return error.InvalidChild;

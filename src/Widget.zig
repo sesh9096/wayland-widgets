@@ -37,28 +37,22 @@ pub const Metadata = struct {
         cr.fill();
         return rect.subtractSpacing(padding, padding);
     }
-
-    /// the contents of the widget has changed requiring a rerender
-    pub fn updated(md: *Metadata, wid: anytype) !void {
-        const surface = md.surface;
-        md.redraw = true;
-        const widget = from(wid);
-        if (widget.needResize()) {
-            if (md.parent) |parent| {
-                try parent.childUpdated(widget);
-            } else {
-                if (surface.widget != null and std.meta.eql(widget, surface.widget.?)) {
-                    try surface.redraw_list.append(widget);
-                    log.err("Surface too small to draw widget, has size {}, needs size {}", .{ surface.size, md.rect.size() });
+};
+pub fn getMetadata(widget: anytype) *Metadata {
+    const T = @TypeOf(widget);
+    if (T == Self or T == *Self or T == *const Self) {
+        return @alignCast(@ptrCast(@as([*]u8, @ptrCast(widget.ptr)) + widget.vtable.metadata_offset));
+    } else {
+        const field_name = comptime blk: {
+            for (@typeInfo(@typeInfo(T).Pointer.child).Struct.fields) |field| {
+                if (field.type == Metadata) {
+                    break :blk field.name;
                 }
             }
-        } else {
-            try surface.redraw_list.append(widget);
-        }
+            @compileError(@typeName(T) ++ " does not have Widget.Metadata");
+        };
+        return &@field(widget, field_name);
     }
-};
-pub fn getMetadata(self: Self) *Metadata {
-    return @alignCast(@ptrCast(@as([*]u8, @ptrCast(self.ptr)) + self.vtable.metadata_offset));
 }
 pub inline fn getMetadataOffset(T: type) u64 {
     for (@typeInfo(T).Struct.fields) |field| {
@@ -207,6 +201,10 @@ pub fn needResize(widget: Widget) bool {
     return rect.larger(widget.getMetadata().rect);
 }
 
+pub fn removeChild(widget: Widget, child: Widget) !void {
+    return widget.vtable.childAction(widget.ptr, .remove, child);
+}
+
 pub fn addChild(widget: Widget, child: Widget) !void {
     return widget.vtable.childAction(widget.ptr, .add, child);
 }
@@ -215,6 +213,26 @@ pub fn clearChildren(widget: Widget) void {
     return widget.vtable.childAction(widget.ptr, .clear, undefined) catch unreachable;
 }
 
-pub fn childUpdated(widget: Widget, child: Widget) !void {
+pub fn updatedChild(widget: Widget, child: Widget) !void {
     try widget.vtable.childAction(widget.ptr, .updated, child);
+}
+
+/// the contents of the widget has changed requiring a rerender
+pub fn updated(wid: anytype) !void {
+    const md = getMetadata(wid);
+    const surface = md.surface;
+    md.redraw = true;
+    const widget = from(wid);
+    if (widget.needResize()) {
+        if (md.parent) |parent| {
+            try parent.updatedChild(widget);
+        } else {
+            if (surface.widget != null and std.meta.eql(widget, surface.widget.?)) {
+                try surface.redraw_list.append(widget);
+                log.err("Surface too small to draw widget, has size {}, needs size {}", .{ surface.size, md.rect.size() });
+            }
+        }
+    } else {
+        try surface.redraw_list.append(widget);
+    }
 }
