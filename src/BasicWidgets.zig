@@ -21,6 +21,8 @@ pub const Text = @import("./BasicWidgets/Text.zig");
 pub const Label = @import("./BasicWidgets/Label.zig");
 pub const Button = @import("./BasicWidgets/Button.zig");
 pub const Box = @import("./BasicWidgets/Box.zig");
+pub const Overlay = @import("./BasicWidgets/Overlay.zig");
+pub const Image = @import("./BasicWidgets/Image.zig");
 
 surface: *Surface,
 image_cache: ImageCache,
@@ -158,51 +160,6 @@ pub fn button(self: *const Self, txt: [:0]const u8, id_gen: IdGenerator) !*Butto
     return widget;
 }
 
-pub const Image = struct {
-    md: Widget.Metadata,
-    surface: *const cairo.Surface,
-    option: Option = .stretch,
-    size: Vec2,
-    pub const Option = enum { stretch, fit, fill, center, tile };
-    pub fn configure(self: *@This(), surface: *const cairo.Surface, option: Option) void {
-        self.surface = surface;
-        self.option = option;
-        self.size = .{ .x = @floatFromInt(surface.getWidth()), .y = @floatFromInt(surface.getHeight()) };
-    }
-    pub fn draw(self: *Image) !void {
-        const md = self.md;
-        const surface = md.surface;
-        const rect = md.rect;
-        const cr = surface.currentBuffer().cairo_context;
-        const image_surface = self.surface;
-        const option = self.option;
-        const size = self.size;
-        cr.save();
-        defer cr.restore();
-        // log.debug("Drawing image at {} {}", .{ bounding_box.x, bounding_box.y });
-        switch (option) {
-            .stretch => {
-                cr.scale(rect.w / size.x, rect.h / size.y);
-                cr.setSourceSurface(image_surface, rect.x, rect.y);
-            },
-            .fit => {
-                cr.setSourceSurface(image_surface, rect.x, rect.y);
-            },
-            .fill => {
-                cr.setSourceSurface(image_surface, rect.x, rect.y);
-            },
-            .center => {
-                cr.setSourceSurface(image_surface, rect.x, rect.y);
-            },
-            .tile => {
-                cr.setSourceSurface(image_surface, rect.x, rect.y);
-            },
-        }
-        cr.paint();
-    }
-    pub const vtable = Widget.Vtable.forType(Image);
-};
-
 pub fn indexOfWidget(list: WidgetList, widget: Widget) ?usize {
     for (list.items, 0..) |item, i| {
         if (std.meta.eql(item, widget)) {
@@ -211,55 +168,3 @@ pub fn indexOfWidget(list: WidgetList, widget: Widget) ?usize {
     }
     return null;
 }
-
-/// draw multiple widgets on top of each other
-pub const Overlay = struct {
-    md: Widget.Metadata,
-    children: WidgetList,
-    pub fn init(self: *Overlay) void {
-        self.children = WidgetList.init(self.md.surface.allocator);
-    }
-    pub fn configure(_: *Overlay) void {}
-    fn draw(self: *Overlay) !void {
-        const rect = self.md.drawDecorationAdjustSize();
-        for (self.children.items) |child| {
-            try child.draw(rect);
-        }
-        // try top.vtable.draw(top, surface, self.inner.overlay.top_rect);
-    }
-    pub fn childAction(self: *Overlay, action: Widget.Action, child: Widget) !void {
-        // TODO: create an special child type to allow for placing items at specific locations
-        switch (action) {
-            .add => {
-                try self.children.append(child);
-            },
-            .updated => if (indexOfWidget(self.children, child)) |index| {
-                try Widget.updated(self);
-                _ = index;
-            } else {
-                log.err("children: {}", .{self.children.items.len});
-                return error.InvalidChild;
-            },
-            .remove => if (indexOfWidget(self.children, child)) |index| {
-                _ = self.children.orderedRemove(index);
-            } else {
-                return error.InvalidChild;
-            },
-            .clear => self.children.clearRetainingCapacity(),
-        }
-    }
-    pub fn getChildren(self: *Overlay) []Widget {
-        return self.children.items;
-    }
-    pub fn proposeSize(self: *Overlay, rect: *Rect) void {
-        // TODO: iterate
-        for (self.children.items) |child| {
-            child.vtable.proposeSize(child.ptr, &child.getMetadata().rect);
-        }
-        _ = rect;
-    }
-    pub fn end(self: *Overlay) void {
-        self.md.surface.end(Widget.from(self));
-    }
-    pub const vtable = Widget.Vtable.forType(Overlay);
-};
