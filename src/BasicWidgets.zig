@@ -39,28 +39,6 @@ pub fn deinit(self: *Self) void {
     self.image_cache.deinit();
 }
 
-// /// Add widget as a child of the current widget.
-// /// Use this if the widget will have no children and subsequent widgets should be added to the parent.
-// pub fn addWidget(self: *const Self, widget: *Widget) !void {
-//     const md = widget.getMetadata();
-//     if (md.surface.widget) |parent| {
-//         md.parent = parent;
-//         try parent.vtable.childAction(parent, .add, widget);
-//     } else {
-//         widget.parent = null;
-//     }
-// }
-// /// Add widget as a child of the current widget and then make it the current widget.
-// /// Use this if you wish to add children to the widget.
-// pub fn addWidgetSetCurrent(self: *const Self, widget: *Widget) !void {
-//     try self.addWidget(widget);
-//     self.setCurrent(widget);
-// }
-
-// pub inline fn setCurrent(self: *const Self, widget: *Widget) void {
-//     self.surface.widget = widget;
-// }
-
 pub fn end(self: *const Self, widget: *Widget) void {
     assert(widget == self.surface.widget);
     if (widget.parent) |parent| {

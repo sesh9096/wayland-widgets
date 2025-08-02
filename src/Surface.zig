@@ -31,31 +31,57 @@ widget: ?Widget = null,
 widget_storage: WidgetFromId,
 allocator: std.mem.Allocator,
 seat: *Seat,
+/// Default Style for all widgets
 style: Style,
-
 /// list of widgets which have been updated and need to be redrawn
 redraw_list: WidgetList,
 /// what the pointer is currently hovering over
 pointer_widget: ?Widget = null,
-/// what the pointer has clicked on or is receiving input
+/// what the pointer has clicked on or is receiving keyboard input
 focused_widget: ?Widget = null,
-/// reason for redraw, null indicates redraw not needed
-reason: ?Reason = null,
-
-const Reason = enum {
-    /// can be automatically redrawn with `Surface.frame`, handlers have handled all cases
-    auto,
-    /// input event which should be manually handled
-    input,
-    /// surface was resized
-    resized,
-    /// first frame
-    first,
-};
+/// if we need a redraw
+updated: bool = true,
 
 const Self = @This();
 
-fn deinit(self: *@This()) void {
+// const RedrawList = struct {
+//     rect_list: RectList,
+//     const RectList = std.ArrayList(Rect);
+//     pub fn init(allocator: std.mem.Allocator) RedrawList {
+//         return .{
+//             .rect_list = RectList.init(allocator),
+//         };
+//     }
+//     pub fn add(self: *RedrawList, rect: Rect) !void {
+//         for (0.., self.rect_list.items) |i, item| {
+//             if (item.contains(rect)) {
+//                 return;
+//             } else if (rect.contains(item)) {
+//                 self.rect_list.items[i] = rect;
+//                 for ((i + 1).., self.rect_list.items[(i + 1)..]) |j, item_check| {
+//                     if (rect.contains(item_check)) {
+//                         self.rect_list.orderedRemove(j);
+//                     }
+//                 }
+//                 return;
+//             }
+//         }
+//         self.rect_list.append(rect);
+//     }
+//     pub fn clear(self: *RedrawList) void {}
+//     pub fn damage(self: *RedrawList, wl_surface: *wl.Surface) void {
+//         for (self.rect_list.items) |rect| {
+//             wl_surface.damage(
+//                 @intFromFloat(rect.x),
+//                 @intFromFloat(rect.y),
+//                 @intFromFloat(rect.w),
+//                 @intFromFloat(rect.h),
+//             );
+//         }
+//     }
+// };
+
+fn deinit(self: *Self) void {
     if (self.wl_surf) |surface| {
         surface.destroy();
     }
@@ -79,7 +105,7 @@ fn fromWlSurface(
         .redraw_list = WidgetList.init(allocator),
         .allocator = allocator,
         .seat = seat,
-        .style = Style.default_style,
+        .style = .{},
         .buffers = undefined,
     };
     // const buffer = try shm_pool.createBuffer(0, width, height, width * 4, .xrgb8888);
@@ -172,9 +198,10 @@ pub fn destroyBuffers(self: *Self) !void {
 }
 
 pub fn notify(self: *Self, event: anytype) void {
+    self.updated = true;
     const eventType = @TypeOf(event);
     if (eventType == wl.Pointer.Event) {}
-    _ = self;
+    // _ = self;
 }
 pub fn getPointer(self: *Self) ?*Seat.Pointer {
     const pointer = &self.seat.pointer;
@@ -203,6 +230,7 @@ pub fn getDeepestWidgetAtPoint(self: *Self, point: Vec2) ?Widget {
 
 /// Send inputs to the relevant widgets
 pub fn handleInputs(self: *Self) void {
+    self.updated = true;
     self.seat.reset();
     if (self.getPointer()) |pointer| {
         if (self.getDeepestWidgetAtPoint(pointer.pos)) |widget_initial| {
@@ -235,6 +263,7 @@ pub fn getCairoContext(self: *Self) *cairo.Context {
 
 pub fn beginFrame(self: *Self) void {
     self.beginFrameRetained();
+    if (self.widget) |widget| self.resetInFrame(widget);
     self.widget = null;
 }
 pub fn beginFrameRetained(self: *Self) void {
@@ -247,6 +276,14 @@ pub fn beginFrameRetained(self: *Self) void {
         self.current_buffer ^= 1;
     }
     self.wl_surface.attach(self.currentBuffer().wl_buffer, 0, 0);
+}
+pub fn resetInFrame(self: *Self, widget: Widget) void {
+    // TODO: FIX
+    widget.getMetadata().in_frame = false;
+    const children = widget.vtable.getChildren(widget.ptr);
+    for (children) |child| {
+        self.resetInFrame(child);
+    }
 }
 pub fn clear(self: *Self) void {
     const clear_color = self.style.getAttributeNullable(.clear_color);
@@ -267,24 +304,37 @@ pub fn endFrame(self: *Self) void {
     //     widget.draw(Rect{ .w = @floatFromInt(self.width), .h = @floatFromInt(self.height) }) catch {};
     // }
     if (self.widget == null) return;
-    for (self.redraw_list.items) |widget| {
-        // Rect{ .w = @floatFromInt(self.width), .h = @floatFromInt(self.height) }
-        // log.debug("drawing {*}", .{widget});
-        const md = widget.getMetadata();
-        md.in_frame = false;
-        widget.draw(if (std.meta.eql(widget, self.widget.?)) self.size.toRectSize() else md.rect) catch {};
+    const rect = self.size.toRectSize();
+    // check if we were resized and need to redraw everything
+    if (!(std.meta.eql(self.widget.?.getMetadata().rect))) {
+        self.widget.?.draw(rect) catch {};
         self.wl_surface.damage(
-            @intFromFloat(md.rect.x),
-            @intFromFloat(md.rect.y),
-            @intFromFloat(md.rect.w),
-            @intFromFloat(md.rect.h),
+            @intFromFloat(rect.x),
+            @intFromFloat(rect.y),
+            @intFromFloat(rect.w),
+            @intFromFloat(rect.h),
         );
-        //self.wl_surface.damage( 0, 0, math.maxInt(@TypeOf(self.width)), math.maxInt(@TypeOf(self.height)));
+    } else {
+        for (self.redraw_list.items) |widget| {
+            // TODO: draw widgets which appear on top and below if needed
+            // Rect{ .w = @floatFromInt(self.width), .h = @floatFromInt(self.height) }
+            log.debug("redrawing {}", .{widget});
+            const md = widget.getMetadata();
+            widget.draw(if (std.meta.eql(widget, self.widget.?)) rect else md.rect) catch {};
+            self.wl_surface.damage(
+                @intFromFloat(md.rect.x),
+                @intFromFloat(md.rect.y),
+                @intFromFloat(md.rect.w),
+                @intFromFloat(md.rect.h),
+            );
+            //self.wl_surface.damage( 0, 0, math.maxInt(@TypeOf(self.width)), math.maxInt(@TypeOf(self.height)));
+        }
     }
     self.currentBuffer().usable = false;
     self.wl_surface.commit();
     self.redraw_list.clearRetainingCapacity();
     self.seat.transitionState();
+    self.updated = false;
 }
 
 /// make it so subsequent widgets will be appended to the widget's parent
@@ -292,10 +342,6 @@ pub fn end(self: *Self, widget: Widget) void {
     assert(std.meta.eql(@as(?Widget, widget), self.widget));
     if (widget.getMetadata().parent) |parent| {
         self.widget = parent;
-    } else {
-        // we are redrawing everything
-        self.redraw_list.clearRetainingCapacity();
-        self.redraw_list.append(widget) catch unreachable;
     }
 }
 /// convenience function to draw a frame
@@ -304,9 +350,26 @@ pub fn frame(self: *Self) void {
     self.endFrame();
 }
 
-/// check if we need to redraw
-pub fn changed(self: *Self) bool {
-    return self.redraw_list.items.len != 0;
+pub fn markRedraw(self: *Self, widget: Widget) !void {
+    self.updated = true;
+    const rect = widget.getMetadata().rect;
+
+    for (0.., self.redraw_list.items) |i, item| {
+        const item_rect = item.getMetadata().rect;
+        if (item_rect.contains(rect)) {
+            return;
+        } else if (rect.contains(item_rect)) {
+            self.redraw_list.items[i] = widget;
+            for ((i + 1).., self.redraw_list.items[(i + 1)..]) |j, item_check| {
+                const item_check_rect = item_check.getMetadata().rect;
+                if (rect.contains(item_check_rect)) {
+                    _ = self.redraw_list.orderedRemove(j);
+                }
+            }
+            return;
+        }
+    }
+    try self.redraw_list.append(widget);
 }
 
 /// Add widget as a child of the current widget.

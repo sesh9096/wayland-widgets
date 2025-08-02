@@ -22,6 +22,7 @@ pub fn configure(self: *Self, text: [:0]const u8) !void {
     const layout = self.layout;
     const hash = common.hash(text);
     if (self.hash != hash) {
+        self.hash = hash;
         const font_description = self.md.style.getAttribute(.default_font).describe();
         layout.setFontDescription(font_description);
         layout.setText(text, @intCast(text.len));
@@ -50,14 +51,10 @@ pub fn draw(self: *Self) !void {
 }
 
 pub fn proposeSize(self: *Self, rect: *Rect) void {
-    // const label = widget.getInner(Self);
-    // const layout = label.layout;
-    // var rect: common.IRect = undefined;
-    // _ = layout.getPixelExtents(null, &rect);
-    _ = self;
-    rect.w = 0;
-    rect.h = 0;
-    // widget.rect = rect.toRect();
+    var irect: common.IRect = undefined;
+    self.layout.setWidth(@intFromFloat((if (rect.w == 0) 300 else rect.w) * pango.SCALE));
+    _ = self.layout.getPixelExtents(null, &irect);
+    rect.h = @floatFromInt(irect.h);
 }
 
 pub const vtable = Widget.Vtable.forType(Self);

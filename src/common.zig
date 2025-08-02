@@ -103,6 +103,9 @@ pub const Rect = struct {
     pub fn size(self: Rect) Vec2 {
         return Vec2{ .x = self.w, .y = self.h };
     }
+    pub fn contains(a: Rect, b: Rect) bool {
+        return a.x <= b.x and a.y <= b.y and a.x + a.w >= b.x + b.w and a.y + a.h >= b.y + b.h;
+    }
 };
 // match with PangoRectangle
 pub const IRect = extern struct {

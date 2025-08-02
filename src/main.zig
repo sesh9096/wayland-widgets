@@ -106,11 +106,10 @@ pub fn main() !void {
     while (true) {
         // log.debug("starting poll", .{});
         const timeout = context.scheduler.runPendingGetTimeInterval();
-        if (surface.changed()) {
-            log.debug("drawing background", .{});
+        if (surface.updated) {
             try frame(&bw);
         }
-        if (bar.changed()) {
+        if (bar.updated) {
             try drawBar(&sw);
         }
         if (context.display.flush() != .SUCCESS) return error.DispatchFailed;

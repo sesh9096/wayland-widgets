@@ -19,7 +19,6 @@ pub const Metadata = struct {
     style: *const Style,
     rect: Rect = .{},
     in_frame: bool = false,
-    redraw: bool = true,
 
     pub fn drawDecorationAdjustSize(md: *const Metadata) Rect {
         const surface = md.surface;
@@ -31,11 +30,22 @@ pub const Metadata = struct {
         const border_rect = rect.subtractSpacing(margin, margin);
         cr.setLineWidth(style.getAttribute(.border_width));
         cr.roundRect(border_rect, style.getAttribute(.border_radius));
-        cr.setSourceColor(style.getAttribute(.border_color));
-        cr.strokePreserve();
-        cr.setSourceColor(style.getAttribute(.bg_color));
-        cr.fill();
+        if (style.getAttributeNullable(.border_color)) |color| {
+            cr.setSourceColor(color);
+            cr.strokePreserve();
+        }
+        if (style.getAttributeNullable(.bg_color)) |color| {
+            cr.setSourceColor(color);
+            cr.fill();
+        }
         return rect.subtractSpacing(padding, padding);
+    }
+    pub fn transparent(md: *const Metadata) bool {
+        if (md.style.getAttributeNullable(.bg_color)) |color| {
+            if (color.a != std.math.maxInt(u8)) return true;
+            return false;
+        }
+        return true;
     }
 };
 pub fn getMetadata(widget: anytype) *Metadata {
@@ -52,13 +62,6 @@ pub fn getMetadata(widget: anytype) *Metadata {
             @compileError(@typeName(T) ++ " does not have Widget.Metadata");
         };
         return &@field(widget, field_name);
-    }
-}
-pub inline fn getMetadataOffset(T: type) u64 {
-    for (@typeInfo(T).Struct.fields) |field| {
-        if (field.type == Metadata) {
-            return @offsetOf(T, field.name);
-        }
     }
 }
 pub const Vtable = struct {
@@ -78,6 +81,8 @@ pub const Vtable = struct {
     proposeSize: *const fn (self: *anyopaque, rect: *Rect) void = proposeSizeDefault,
     /// number of bytes to add to base pointer to get metadata
     metadata_offset: u64 = 0,
+    /// debug info
+    type_name: [:0]const u8 = "",
 
     /// for widgets which are base nodes
     pub fn childActionDefault(_: *anyopaque, action: Action, _: Widget) !void {
@@ -166,10 +171,11 @@ pub fn from(widget: anytype) Widget {
     };
 }
 
+/// allocate a widget and populate metadata
 pub fn initWidget(surface: *Surface, T: type) !*T {
     const allocator = surface.allocator;
     const ptr = try allocator.create(T);
-    from(ptr).getMetadata().* = .{
+    getMetadata(ptr).* = .{
         .style = &surface.style,
         .surface = surface,
         .rect = Rect{},
@@ -188,8 +194,7 @@ pub fn draw(widget: Widget, bounding_box: Rect) anyerror!void {
     const md = widget.getMetadata();
     md.rect = bounding_box;
     md.in_frame = false;
-    if (md.redraw or !std.meta.eql(md.rect, bounding_box)) {
-        md.redraw = false;
+    if (!std.meta.eql(md.rect, bounding_box)) {
         try widget.vtable.draw(md);
     }
 }
@@ -221,7 +226,6 @@ pub fn updatedChild(widget: Widget, child: Widget) !void {
 pub fn updated(wid: anytype) !void {
     const md = getMetadata(wid);
     const surface = md.surface;
-    md.redraw = true;
     const widget = from(wid);
     if (widget.needResize()) {
         if (md.parent) |parent| {
@@ -233,6 +237,21 @@ pub fn updated(wid: anytype) !void {
             }
         }
     } else {
-        try surface.redraw_list.append(widget);
+        try surface.markRedraw(widget);
     }
+}
+
+pub fn format(value: Widget, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+    try writer.print("{s}@{x}", .{ value.vtable.type_name, @intFromPtr(value.ptr) });
+}
+
+pub fn hasParent(self: Widget, possible_parent: Widget) bool {
+    var widget = self;
+    while (widget.getMetadata().parent) |parent| {
+        if (std.meta.eql(parent, possible_parent)) {
+            return true;
+        }
+        widget = parent;
+    }
+    return false;
 }
