@@ -16,7 +16,7 @@ clicked: bool = false,
 pub fn configure(self: *Self) void {
     self.child = null;
 }
-fn draw(self: *Self) !void {
+pub fn draw(self: *Self) !void {
     // draw itself
     // const cr = surface.getCairoContext();
     const rect = self.md.drawDecorationAdjustSize();

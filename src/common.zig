@@ -50,7 +50,7 @@ pub const UVec2 = struct {
         return Rect{ .w = @floatFromInt(v.x), .h = @floatFromInt(v.y) };
     }
 };
-pub const Rect = struct {
+pub const Rect = extern struct {
     x: f32 = 0,
     y: f32 = 0,
     w: f32 = 0,
@@ -100,11 +100,21 @@ pub const Rect = struct {
     pub fn larger(a: Rect, b: Rect) bool {
         return a.h > b.h and a.w > b.w;
     }
+    // pub fn size(self: Rect) Vec2 {
+    //     return Vec2{ .x = self.w, .y = self.h };
+    // }
+    pub fn point(self: Rect) Vec2 {
+        return Vec2{ .x = self.x, .y = self.y };
+    }
     pub fn size(self: Rect) Vec2 {
         return Vec2{ .x = self.w, .y = self.h };
     }
     pub fn contains(a: Rect, b: Rect) bool {
         return a.x <= b.x and a.y <= b.y and a.x + a.w >= b.x + b.w and a.y + a.h >= b.y + b.h;
+    }
+    pub fn setSize(self: *Rect, v: Vec2) void {
+        self.w = v.x;
+        self.h = v.y;
     }
 };
 // match with PangoRectangle
@@ -144,6 +154,14 @@ pub const Direction = enum {
     right,
     up,
     down,
+};
+
+pub const Alignment = enum {
+    normal,
+    opposite,
+    center,
+    sparse,
+    stretch,
 };
 
 pub const Expand = enum {

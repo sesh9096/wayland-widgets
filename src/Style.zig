@@ -42,10 +42,10 @@ pub var default_theme = Theme{
 
 /// argb Color
 pub const Color = packed struct(u32) {
-    a: u8 = std.math.maxInt(u8),
-    r: u8 = 0,
-    g: u8 = 0,
     b: u8 = 0,
+    g: u8 = 0,
+    r: u8 = 0,
+    a: u8 = std.math.maxInt(u8),
     pub const ParseIntError = std.fmt.ParseIntError;
     pub fn fromString(str: [:0]const u8) ParseIntError!Color {
         const hex = if (str[0] == '#') str[1..] else if (str[0] == '0' and str[1] == 'x') str[2..] else str;

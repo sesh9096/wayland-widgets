@@ -27,10 +27,12 @@ pub fn configure(self: *Self, text: [:0]const u8) !void {
     const layout = self.layout;
     const hash = common.hash(text);
     if (self.hash != hash) {
+        self.hash = hash;
         const font_description = self.md.style.getAttribute(.default_font).describe();
         layout.setFontDescription(font_description);
         layout.setText(text, @intCast(text.len));
         try Widget.updated(self);
+        // log.debug("updated text {s}", .{text});
     }
 }
 pub fn draw(self: *Self) !void {
@@ -45,7 +47,7 @@ pub fn draw(self: *Self) !void {
     pango.PangoCairo.showLayout(cr, self.layout);
 
     // pango.PangoCairo.showGlyphString(cr, font, label.glyphs);
-    // log.debug("{}", .{widget.rect});
+    // log.debug("{s} {}", .{ self.text, rect });
     // log.debug("Drawing text {s} at {} {}", .{ label.text, rect.x, rect.y });
 }
 

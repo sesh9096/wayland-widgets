@@ -144,7 +144,7 @@ pub fn frame(bw: *BasicWidgets) !void {
     {
         const overlay = try bw.overlay(.{ .src = @src() });
         defer overlay.end();
-        try bw.image("/home/ss/pictures/draw/experiment.png", .stretch, .{ .src = @src() });
+        try bw.image("/home/ss/pictures/draw/logo.png", .stretch, .{ .src = @src() });
         const main_layout = try bw.column(.{ .src = @src() });
         defer main_layout.end();
         const innerbox = try bw.row(.{ .src = @src() });
@@ -173,7 +173,7 @@ fn drawBar(sw: *StatusWidgets) !void {
     const bw = sw.bw;
     const s = bw.surface;
     s.beginFrame();
-    s.clear();
+    s.clear(.{});
     defer s.endFrame();
     {
         const box = try bw.row(.{ .src = @src() });

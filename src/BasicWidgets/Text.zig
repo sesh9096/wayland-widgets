@@ -47,12 +47,13 @@ pub fn draw(self: *Self) !void {
     cr.moveTo(rect.x, rect.y);
     cr.setLineWidth(1);
     pango.PangoCairo.showLayout(cr, layout);
-    // log.debug("Drawing text {} at {} {}", .{ text, rect.x, rect.y });
+    // log.debug("Drawing text {s} at {} {}, {}", .{ text, rect.x, rect.y, rect.size() });
 }
 
 pub fn proposeSize(self: *Self, rect: *Rect) void {
     var irect: common.IRect = undefined;
-    self.layout.setWidth(@intFromFloat((if (rect.w == 0) 300 else rect.w) * pango.SCALE));
+    rect.w = if (rect.w == 0) 300 else rect.w;
+    self.layout.setWidth(@intFromFloat(rect.w * pango.SCALE));
     _ = self.layout.getPixelExtents(null, &irect);
     rect.h = @floatFromInt(irect.h);
 }

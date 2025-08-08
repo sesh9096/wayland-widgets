@@ -18,7 +18,7 @@ pub fn init(self: *Self) void {
     self.children = WidgetList.init(self.md.surface.allocator);
 }
 pub fn configure(_: *Self) void {}
-fn draw(self: *Self) !void {
+pub fn draw(self: *Self) !void {
     const rect = self.md.drawDecorationAdjustSize();
     for (self.children.items) |child| {
         try child.draw(rect);

@@ -41,6 +41,7 @@ pointer_widget: ?Widget = null,
 focused_widget: ?Widget = null,
 /// if we need a redraw
 updated: bool = true,
+clip: Rect = Rect.inf,
 
 const Self = @This();
 
@@ -285,14 +286,8 @@ pub fn resetInFrame(self: *Self, widget: Widget) void {
         self.resetInFrame(child);
     }
 }
-pub fn clear(self: *Self) void {
-    const clear_color = self.style.getAttributeNullable(.clear_color);
-    const buf8 = self.currentBuffer().shared_memory;
-    var buf32: []u32 = undefined;
-    buf32.ptr = @alignCast(@ptrCast(buf8.ptr));
-    buf32.len = buf8.len / 4;
-    if (clear_color) |color|
-        @memset(buf32, @bitCast(color));
+pub fn clear(self: *Self, color: Style.Color) void {
+    @memset(std.mem.bytesAsSlice(u32, self.currentBuffer().shared_memory), @bitCast(color));
 }
 
 pub fn endFrame(self: *Self) void {
@@ -306,29 +301,31 @@ pub fn endFrame(self: *Self) void {
     if (self.widget == null) return;
     const rect = self.size.toRectSize();
     // check if we were resized and need to redraw everything
-    if (!(std.meta.eql(self.widget.?.getMetadata().rect))) {
-        self.widget.?.draw(rect) catch {};
+    const root = self.widget.?;
+    if (!(std.meta.eql(root.getMetadata().rect, rect))) {
+        log.debug("full redraw, {}", .{rect.size()});
+        self.redraw_list.items[0] = root;
+        self.redraw_list.items = self.redraw_list.items[0..1];
+        root.getMetadata().rect = rect;
+    }
+    for (self.redraw_list.items) |widget| {
+        // TODO: draw widgets which appear on top and below if needed
+        // Rect{ .w = @floatFromInt(self.width), .h = @floatFromInt(self.height) }
+        const md = widget.getMetadata();
+        // log.debug("redrawing {} at {}, size: {}", .{ widget, md.rect.point(), md.rect.size() });
+        self.clip = md.rect;
+        const cr = self.getCairoContext();
+        cr.clipRect(self.clip);
+        defer cr.resetClip();
+        // widget.draw(md.rect) catch {};
+        root.draw(root.getMetadata().rect) catch {};
         self.wl_surface.damage(
-            @intFromFloat(rect.x),
-            @intFromFloat(rect.y),
-            @intFromFloat(rect.w),
-            @intFromFloat(rect.h),
+            @intFromFloat(md.rect.x),
+            @intFromFloat(md.rect.y),
+            @intFromFloat(md.rect.w),
+            @intFromFloat(md.rect.h),
         );
-    } else {
-        for (self.redraw_list.items) |widget| {
-            // TODO: draw widgets which appear on top and below if needed
-            // Rect{ .w = @floatFromInt(self.width), .h = @floatFromInt(self.height) }
-            log.debug("redrawing {}", .{widget});
-            const md = widget.getMetadata();
-            widget.draw(if (std.meta.eql(widget, self.widget.?)) rect else md.rect) catch {};
-            self.wl_surface.damage(
-                @intFromFloat(md.rect.x),
-                @intFromFloat(md.rect.y),
-                @intFromFloat(md.rect.w),
-                @intFromFloat(md.rect.h),
-            );
-            //self.wl_surface.damage( 0, 0, math.maxInt(@TypeOf(self.width)), math.maxInt(@TypeOf(self.height)));
-        }
+        //self.wl_surface.damage( 0, 0, math.maxInt(@TypeOf(self.width)), math.maxInt(@TypeOf(self.height)));
     }
     self.currentBuffer().usable = false;
     self.wl_surface.commit();

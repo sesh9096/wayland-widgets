@@ -18,6 +18,7 @@ md: Widget.Metadata,
 direction: Direction = .right,
 expand: Expand,
 children: WidgetList,
+hash: u32,
 pub fn init(self: *Self) void {
     self.children = WidgetList.init(self.md.surface.allocator);
 }
@@ -28,35 +29,34 @@ pub fn configure(self: *Self, direction: Direction, expand: Expand) void {
 
 pub fn childAction(self: *Self, action: Widget.Action, child: Widget) !void {
     // log.debug("adding child", .{});
+    const children = &self.children;
     switch (action) {
         .add => {
-            try self.children.append(child);
-            try Widget.updated(self);
+            try children.append(child);
         },
         .clear => {
-            for (self.children.items) |chld| {
-                chld.getMetadata().parent = null;
-            }
-            self.children.items.len = 0;
+            // for (children.items) |chld| {
+            //     chld.getMetadata().parent = null;
+            // }
+            children.items.len = 0;
         },
         .remove => {
-            if (indexOfWidget(self.children, child)) |index| {
-                _ = self.children.orderedRemove(index);
+            if (indexOfWidget(children.*, child)) |index| {
+                _ = children.orderedRemove(index);
             } else {
                 return error.InvalidChild;
             }
         },
         .updated => {
-            if (indexOfWidget(self.children, child)) |index| {
+            if (indexOfWidget(children.*, child)) |index| {
                 try Widget.updated(self);
                 _ = index;
             } else {
-                return error.InvalidChild;
+                if (children.items.len < children.capacity and std.meta.eql(children.items.ptr[children.items.len], child)) {
+                    try Widget.updated(self);
+                } else return error.InvalidChild;
             }
         },
-        // .commit => {
-        //     try widget.updated();
-        // },
     }
 }
 pub fn getChildren(self: *Self) []Widget {
@@ -117,9 +117,9 @@ pub fn draw(self: *Self) !void {
             for (self.children.items) |child| {
                 const weight = 1;
                 const child_width = child.getMetadata().rect.w;
-                rect.x = rect.x + rect.w;
                 rect.w = if (hexpand or child_width == 0) scale * weight else child_width;
                 try child.draw(rect);
+                rect.x = rect.x + rect.w;
             }
         },
         .up, .down => {
@@ -138,14 +138,19 @@ pub fn draw(self: *Self) !void {
             for (self.children.items) |child| {
                 const weight = 1;
                 const child_height = child.getMetadata().rect.h;
-                rect.y = rect.y + rect.h;
                 rect.h = if (vexpand or child_height == 0) scale * weight else child_height;
                 try child.draw(rect);
+                rect.y = rect.y + rect.h;
             }
         },
     }
 }
 pub fn end(self: *Self) void {
     self.md.surface.end(Widget.from(self));
+    const hash = common.hash_any(self.children.items);
+    if (self.hash != hash) {
+        Widget.updated(self) catch unreachable;
+        self.hash = hash;
+    }
 }
 pub const vtable = Widget.Vtable.forType(Self);

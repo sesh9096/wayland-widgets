@@ -6,6 +6,7 @@ const log = std.log;
 const common = @import("./common.zig");
 const Surface = common.Surface;
 const Rect = common.Rect;
+const Vec2 = common.Vec2;
 const Style = common.Style;
 const Widget = @This();
 const Self = @This();
@@ -96,7 +97,9 @@ pub const Vtable = struct {
     }
 
     /// draw nothing
-    pub fn drawDefault(_: *anyopaque) !void {}
+    pub fn drawDefault(_: *anyopaque) !void {
+        log.warn("default draw function", .{});
+    }
 
     pub fn handleInputDefault(_: *anyopaque) !void {}
 
@@ -154,6 +157,8 @@ pub const Vtable = struct {
                         vtable.metadata_offset = @offsetOf(T, sfield.name);
                     }
                 }
+            } else if (std.mem.eql(u8, field.name, "type_name")) {
+                vtable.type_name = @typeName(T);
             }
         }
         return vtable;
@@ -185,8 +190,9 @@ pub fn initWidget(surface: *Surface, T: type) !*T {
     if (@hasDecl(T, "init")) ptr.init();
     return ptr;
 }
-pub fn getInner(self: *Widget, T: type) *T {
-    return @ptrCast(@alignCast(self.ptr));
+
+pub fn size(widget: Widget) Vec2 {
+    return widget.getMetadata().rect.size();
 }
 
 /// call widget.vtable.draw on widget, set rectangle, and do some housekeeping
@@ -194,14 +200,12 @@ pub fn draw(widget: Widget, bounding_box: Rect) anyerror!void {
     const md = widget.getMetadata();
     md.rect = bounding_box;
     md.in_frame = false;
-    if (!std.meta.eql(md.rect, bounding_box)) {
-        try widget.vtable.draw(md);
-    }
+    try widget.vtable.draw(md);
 }
 
 /// helper function to check on change if we need parent to resize
 pub fn needResize(widget: Widget) bool {
-    var rect: Rect = undefined;
+    var rect: Rect = .{};
     widget.vtable.proposeSize(widget.ptr, &rect);
     return rect.larger(widget.getMetadata().rect);
 }
