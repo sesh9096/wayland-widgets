@@ -5,7 +5,7 @@ const common = @import("../common.zig");
 const Surface = common.Surface;
 const Widget = common.Widget;
 const cairo = common.cairo;
-const Direction = common.Direction;
+const Orientation = common.Orientation;
 const Rect = common.Rect;
 const Vec2 = common.Vec2;
 const Expand = common.Expand;
@@ -15,16 +15,16 @@ const indexOfWidget = BasicWidgets.indexOfWidget;
 const Self = @This();
 
 md: Widget.Metadata,
-direction: Direction = .right,
+orientation: Orientation = .horizontal,
 expand: Expand,
 children: WidgetList,
 hash: u32,
 pub fn init(self: *Self) void {
     self.children = WidgetList.init(self.md.surface.allocator);
 }
-pub fn configure(self: *Self, direction: Direction, expand: Expand) void {
+pub fn configure(self: *Self, orientation: Orientation, expand: Expand) void {
     self.expand = expand;
-    self.direction = direction;
+    self.orientation = orientation;
 }
 
 pub fn childAction(self: *Self, action: Widget.Action, child: Widget) !void {
@@ -64,8 +64,8 @@ pub fn getChildren(self: *Self) []Widget {
 }
 pub fn proposeSize(self: *Self, rect: *Rect) void {
     // TODO: iterate
-    switch (self.direction) {
-        .left, .right => {
+    switch (self.orientation) {
+        .horizontal => {
             var w: f32 = 0;
             var h: f32 = 0;
             for (self.children.items) |child| {
@@ -77,7 +77,7 @@ pub fn proposeSize(self: *Self, rect: *Rect) void {
             rect.h = h;
             rect.w = w;
         },
-        .down, .up => {
+        .vertical => {
             var w: f32 = 0;
             var h: f32 = 0;
             for (self.children.items) |child| {
@@ -99,8 +99,8 @@ pub fn draw(self: *Self) !void {
     var rect = md.drawDecorationAdjustSize();
     const hexpand = self.expand.horizontal();
     const vexpand = self.expand.vertical();
-    switch (self.direction) {
-        .left, .right => {
+    switch (self.orientation) {
+        .horizontal => {
             var min_width: f32 = 0;
             var total_weight: f32 = 0;
             for (self.children.items) |child| {
@@ -122,7 +122,7 @@ pub fn draw(self: *Self) !void {
                 rect.x = rect.x + rect.w;
             }
         },
-        .up, .down => {
+        .vertical => {
             var min_width: f32 = 0;
             var total_weight: f32 = 0;
             for (self.children.items) |child| {

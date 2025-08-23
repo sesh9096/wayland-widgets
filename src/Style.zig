@@ -100,6 +100,7 @@ pub const Item = union(enum) {
 
     default_font: *const Font,
     variable_font: *const Font,
+    font_width: f32,
 
     theme: *const Theme,
     pub const Tag = std.meta.Tag(Item);
@@ -120,6 +121,8 @@ pub const Theme = struct {
 
     default_font: *const Font,
     variable_font: ?*const Font = null,
+
+    font_width: f32 = 1,
 
     pub fn getAttribute(self: Theme, comptime attribute: Item.Tag) std.meta.TagPayload(Item, attribute) {
         const tag: std.meta.Tag(Item) = attribute;

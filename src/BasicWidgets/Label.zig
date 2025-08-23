@@ -39,11 +39,12 @@ pub fn draw(self: *Self) !void {
     const surface = self.md.surface;
     const cr = surface.getCairoContext();
     const rect = self.md.drawDecorationAdjustSize();
+    const style = self.md.style;
     // defer label.layout.free();
 
-    cr.setSourceRgb(1, 1, 1);
+    cr.setSourceColor(style.getAttribute(.fg_color));
+    cr.setLineWidth(style.getAttribute(.font_width));
     cr.moveTo(rect.x, rect.y);
-    cr.setLineWidth(1);
     pango.PangoCairo.showLayout(cr, self.layout);
 
     // pango.PangoCairo.showGlyphString(cr, font, label.glyphs);
@@ -55,7 +56,7 @@ pub fn proposeSize(self: *Self, rect: *Rect) void {
     const layout = self.layout;
     var irect: common.IRect = undefined;
     _ = layout.getPixelExtents(null, &irect);
-    irect.w += 10; // why????
+    // irect.w += 10; // why????
     rect.* = irect.toRect();
 
     // const attr_list = pango.AttrList.new();

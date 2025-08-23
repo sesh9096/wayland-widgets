@@ -106,7 +106,7 @@ pub const Rect = extern struct {
     pub fn point(self: Rect) Vec2 {
         return Vec2{ .x = self.x, .y = self.y };
     }
-    pub fn size(self: Rect) Vec2 {
+    pub fn getSize(self: Rect) Vec2 {
         return Vec2{ .x = self.w, .y = self.h };
     }
     pub fn contains(a: Rect, b: Rect) bool {
@@ -149,12 +149,7 @@ pub const KeyState = enum {
     }
 };
 
-pub const Direction = enum {
-    left,
-    right,
-    up,
-    down,
-};
+pub const Orientation = enum { horizontal, vertical };
 
 pub const Alignment = enum {
     normal,

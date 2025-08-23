@@ -11,7 +11,6 @@ const Surface = @import("./Surface.zig");
 const common = @import("./common.zig");
 const Rect = common.Rect;
 const Vec2 = common.Vec2;
-const Direction = common.Direction;
 const Expand = common.Expand;
 const IdGenerator = common.IdGenerator;
 const typeHash = common.typeHash;
@@ -46,27 +45,27 @@ pub fn end(self: *const Self, widget: *Widget) void {
     }
 }
 
-pub fn getBox(self: *const Self, direction: Direction, expand: Expand, id_gen: IdGenerator) !*Box {
+pub fn getBox(self: *const Self, orientation: common.Orientation, expand: Expand, id_gen: IdGenerator) !*Box {
     const widget = try self.surface.getWidget(id_gen.add(.{
         .type_hash = typeHash(Box),
         .parent = self.surface.widget,
     }), Box);
-    widget.configure(direction, expand);
+    widget.configure(orientation, expand);
 
     // const widget = try Box.widget(self.allocator, direction);
     return widget;
 }
-pub fn box(self: *const Self, direction: Direction, expand: Expand, id_gen: IdGenerator) !*Box {
-    const widget = try self.getBox(direction, expand, id_gen);
+pub fn box(self: *const Self, orientation: common.Orientation, expand: Expand, id_gen: IdGenerator) !*Box {
+    const widget = try self.getBox(orientation, expand, id_gen);
     Widget.from(widget).clearChildren();
     try self.surface.addWidgetSetCurrent(widget);
     return widget;
 }
 pub fn row(self: *const Self, id_gen: IdGenerator) !*Box {
-    return self.box(.right, .none, id_gen);
+    return self.box(.horizontal, .none, id_gen);
 }
 pub fn column(self: *const Self, id_gen: IdGenerator) !*Box {
-    return self.box(.down, .none, id_gen);
+    return self.box(.vertical, .none, id_gen);
 }
 
 pub fn getOverlay(self: *const Self, id_gen: IdGenerator) !*Overlay {

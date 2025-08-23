@@ -303,7 +303,7 @@ pub fn endFrame(self: *Self) void {
     // check if we were resized and need to redraw everything
     const root = self.widget.?;
     if (!(std.meta.eql(root.getMetadata().rect, rect))) {
-        log.debug("full redraw, {}", .{rect.size()});
+        log.debug("full redraw, {}", .{rect.getSize()});
         self.redraw_list.items[0] = root;
         self.redraw_list.items = self.redraw_list.items[0..1];
         root.getMetadata().rect = rect;

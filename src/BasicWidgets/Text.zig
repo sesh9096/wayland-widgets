@@ -34,18 +34,20 @@ pub fn draw(self: *Self) !void {
     const surface = self.md.surface;
     const cr = surface.getCairoContext();
     const rect = self.md.drawDecorationAdjustSize();
+    const style = self.md.style;
     const layout = self.layout;
     const text = self.text;
     // defer label.layout.free();
 
-    const font_description = self.md.style.getAttribute(.variable_font).describe();
+    const font_description = style.getAttribute(.variable_font).describe();
     layout.setFontDescription(font_description);
     layout.setWidth(@intFromFloat(rect.w * pango.SCALE));
     layout.setHeight(@intFromFloat(rect.h * pango.SCALE));
     layout.setText(text, -1);
-    cr.setSourceRgb(1, 1, 1);
+
+    cr.setSourceColor(style.getAttribute(.fg_color));
+    cr.setLineWidth(style.getAttribute(.font_width));
     cr.moveTo(rect.x, rect.y);
-    cr.setLineWidth(1);
     pango.PangoCairo.showLayout(cr, layout);
     // log.debug("Drawing text {s} at {} {}, {}", .{ text, rect.x, rect.y, rect.size() });
 }

@@ -20,6 +20,7 @@ pub const Metadata = struct {
     style: *const Style,
     rect: Rect = .{},
     in_frame: bool = false,
+    updated: bool = false,
 
     pub fn drawDecorationAdjustSize(md: *const Metadata) Rect {
         const surface = md.surface;
@@ -29,7 +30,8 @@ pub const Metadata = struct {
         const padding = style.getAttribute(.padding);
         const margin = style.getAttribute(.margin);
         const border_rect = rect.subtractSpacing(margin, margin);
-        cr.setLineWidth(style.getAttribute(.border_width));
+        const border_width = style.getAttribute(.border_width);
+        cr.setLineWidth(border_width);
         cr.roundRect(border_rect, style.getAttribute(.border_radius));
         if (style.getAttributeNullable(.border_color)) |color| {
             cr.setSourceColor(color);
@@ -40,6 +42,9 @@ pub const Metadata = struct {
             cr.fill();
         }
         return rect.subtractSpacing(padding, padding);
+    }
+    pub fn setSize(md: *Metadata, size: Vec2) void {
+        md.rect.setSize(size);
     }
     pub fn transparent(md: *const Metadata) bool {
         if (md.style.getAttributeNullable(.bg_color)) |color| {
@@ -73,7 +78,6 @@ pub const Vtable = struct {
     getChildren: *const fn (self: *anyopaque) []Widget = getChildrenDefault,
     /// draw the widget on the surface
     /// use widget.rect as the rect for drawing
-    /// prefer widget.draw(rect), do not use directly unless you have a very good reason
     draw: *const fn (self: *anyopaque) anyerror!void = drawDefault,
     /// handle input, call the corresponding function on parent if not handled
     handleInput: *const fn (self: *anyopaque) anyerror!void = handleInputDefault,
@@ -191,8 +195,8 @@ pub fn initWidget(surface: *Surface, T: type) !*T {
     return ptr;
 }
 
-pub fn size(widget: Widget) Vec2 {
-    return widget.getMetadata().rect.size();
+pub fn getSize(widget: Widget) Vec2 {
+    return widget.getMetadata().rect.getSize();
 }
 
 /// call widget.vtable.draw on widget, set rectangle, and do some housekeeping
@@ -237,7 +241,7 @@ pub fn updated(wid: anytype) !void {
         } else {
             if (surface.widget != null and std.meta.eql(widget, surface.widget.?)) {
                 try surface.redraw_list.append(widget);
-                log.err("Surface too small to draw widget, has size {}, needs size {}", .{ surface.size, md.rect.size() });
+                log.err("Surface too small to draw widget, has size {}, needs size {}", .{ surface.size, md.rect.getSize() });
             }
         }
     } else {
