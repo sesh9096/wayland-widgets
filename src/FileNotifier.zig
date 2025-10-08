@@ -3,8 +3,10 @@ const std = @import("std");
 const mem = std.mem;
 const log = std.log;
 const posix = std.posix;
+
 fd: i32,
 handlers: Handlers,
+
 pub const IN = std.os.linux.IN;
 pub const Event = std.os.linux.inotify_event;
 pub const Handler = struct {

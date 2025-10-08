@@ -241,6 +241,7 @@ pub fn updated(wid: anytype) !void {
         } else {
             if (surface.widget != null and std.meta.eql(widget, surface.widget.?)) {
                 try surface.redraw_list.append(widget);
+                // TODO: resize
                 log.err("Surface too small to draw widget, has size {}, needs size {}", .{ surface.size, md.rect.getSize() });
             }
         }

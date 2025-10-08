@@ -27,6 +27,7 @@ shared_memory: []align(std.mem.page_size) u8 = &.{},
 size: UVec2,
 buffers: [2]Buffer,
 current_buffer: u1 = 0,
+request_resize: *const fn (self: *Self, size: Vec2) bool = requestResizeExample,
 widget: ?Widget = null,
 widget_storage: WidgetFromId,
 allocator: std.mem.Allocator,
@@ -42,7 +43,6 @@ focused_widget: ?Widget = null,
 /// if we need a redraw
 updated: bool = true,
 clip: Rect = Rect.inf,
-
 const Self = @This();
 
 // const RedrawList = struct {
@@ -197,6 +197,10 @@ pub fn destroyBuffers(self: *Self) !void {
     self.shared_memory = &.{};
     self.current_buffer = 0;
 }
+pub fn requestResizeExample(_: *Self, _: Vec2) bool {
+    // resizes not possible
+    return false;
+}
 
 pub fn notify(self: *Self, event: anytype) void {
     self.updated = true;
@@ -264,7 +268,7 @@ pub fn getCairoContext(self: *Self) *cairo.Context {
 
 pub fn beginFrame(self: *Self) void {
     self.beginFrameRetained();
-    if (self.widget) |widget| self.resetInFrame(widget);
+    if (self.widget) |widget| resetInFrame(widget);
     self.widget = null;
 }
 pub fn beginFrameRetained(self: *Self) void {
@@ -278,12 +282,12 @@ pub fn beginFrameRetained(self: *Self) void {
     }
     self.wl_surface.attach(self.currentBuffer().wl_buffer, 0, 0);
 }
-pub fn resetInFrame(self: *Self, widget: Widget) void {
+pub fn resetInFrame(widget: Widget) void {
     // TODO: FIX
     widget.getMetadata().in_frame = false;
     const children = widget.vtable.getChildren(widget.ptr);
     for (children) |child| {
-        self.resetInFrame(child);
+        resetInFrame(child);
     }
 }
 pub fn clear(self: *Self, color: Style.Color) void {
@@ -303,9 +307,9 @@ pub fn endFrame(self: *Self) void {
     // check if we were resized and need to redraw everything
     const root = self.widget.?;
     if (!(std.meta.eql(root.getMetadata().rect, rect))) {
-        log.debug("full redraw, {}", .{rect.getSize()});
-        self.redraw_list.items[0] = root;
-        self.redraw_list.items = self.redraw_list.items[0..1];
+        // log.debug("full redraw, {}", .{rect.getSize()});
+        self.redraw_list.clearRetainingCapacity();
+        self.redraw_list.append(root) catch unreachable; // root should already be in the list
         root.getMetadata().rect = rect;
     }
     for (self.redraw_list.items) |widget| {

@@ -12,9 +12,12 @@ pub const Surface = @import("./Surface.zig");
 pub const Widget = @import("./Widget.zig");
 pub const Scheduler = @import("./Scheduler.zig");
 pub const FileNotifier = @import("./FileNotifier.zig");
+pub const Watch = @import("./Watch.zig");
+pub const dbus = @import("dbus/dbus.zig");
 pub const c = @cImport({
     @cInclude("cairo/cairo.h");
     @cInclude("pango/pangocairo.h");
+    @cInclude("dbus/dbus.h");
     @cInclude("time.h");
     @cInclude("linux/input-event-codes.h");
 });
@@ -198,7 +201,7 @@ pub const IdGenerator = struct {
     parent: ?Widget = null,
     /// Generally set by a widget creator so avoid using in high level calls.
     /// If other fields are set, we will avoid using this as part of seed.
-    ptr: ?*anyopaque = null,
+    ptr: ?*const anyopaque = null,
     /// Generally set by a widget creator so avoid using in high level calls.
     /// If other fields are set, we will avoid using this as part of seed.
     str: ?[]const u8 = null,
@@ -209,11 +212,12 @@ pub const IdGenerator = struct {
     }
     pub fn toId(self: @This()) u32 {
         if (self.id) |id| {
+            // allows manually specifying id
             return id;
         } else {
             const component_location = if (self.src) |loc| idFromSourceLocation(loc) else 0;
             const component_extra = if (self.extra) |extra| hash_any(extra) else 0;
-            var id: u32 = component_location ^ component_extra;
+            var id: u32 = component_location;
             // assert(id != 0);
             if (id == 0) {
                 const component_parent = if (self.parent) |parent| hash_any(parent) else 0;
@@ -222,7 +226,7 @@ pub const IdGenerator = struct {
                 id = component_parent ^ component_ptr ^ component_str;
             }
             const component_type = self.type_hash orelse 0;
-            return id ^ component_type;
+            return id ^ component_type ^ component_extra;
         }
     }
 

@@ -18,10 +18,15 @@ const Vec2 = common.Vec2;
 const KeyState = common.KeyState;
 const pango = common.pango;
 const Style = common.Style;
+const Watch = common.Watch;
+const dbus = common.dbus;
+const FileNotifier = common.FileNotifier;
 const c = common.c;
 
 display: *wl.Display,
 scheduler: Scheduler,
+watch: Watch,
+file_notifier: *FileNotifier,
 compositor: *wl.Compositor = undefined,
 shm: *wl.Shm = undefined,
 seat: Seat = undefined,
@@ -33,11 +38,12 @@ font_map: *pango.FontMap,
 pango_context: *pango.Context,
 
 const Context = @This();
-pub fn init(allocator: Allocator) !@This() {
+// pub fn init(allocator: Allocator) !@This() {
+pub fn configure(self: *Context, allocator: Allocator) !void {
     const font_map = pango.PangoCairo.fontMapGetDefault();
     const pango_context = font_map.createContext();
     pango_context.setRoundGlyphPositions(false);
-    const font_description = pango.FontDescription.fromString("monospace");
+    const font_description = pango.FontDescription.fromString("mono space");
     font_description.setAbsoluteSize(pango.SCALE * 11);
     defer font_description.free();
     Style.default_theme.default_font = font_map.loadFont(pango_context, font_description);
@@ -46,18 +52,131 @@ pub fn init(allocator: Allocator) !@This() {
     variable_font_description.setAbsoluteSize(pango.SCALE * 11);
     defer variable_font_description.free();
     Style.default_theme.variable_font = font_map.loadFont(pango_context, variable_font_description);
-    return @This(){
+    var watch = Watch.init(allocator);
+    const display = try wl.Display.connect(null);
+
+    var err = dbus.Error{};
+    err.init();
+    const dbus_connection = dbus.busGet(.session, &err) orelse {
+        log.err("{s} {s}", .{ err.name.?, err.message.? });
+        return error.Dbus;
+    };
+    _ = dbus_connection.addFilter(dbus.printFilter, undefined, null);
+
+    const file_notifier = try allocator.create(FileNotifier);
+    file_notifier.* = try FileNotifier.init(allocator);
+
+    try watch.appendSlice(&.{
+        .{
+            .events = std.posix.POLL.IN,
+            .fd = display.getFd(),
+            .revents = 0,
+        },
+        .{
+            .events = std.posix.POLL.IN,
+            .fd = file_notifier.fd,
+            .revents = 0,
+        },
+        // .{
+        //     .events = std.posix.POLL.IN,
+        //     .fd = dbus_connection.getFd(),
+        //     .revents = 0,
+        // },
+    }, &.{
+        Watch.Handler.create(
+            display,
+            displayDispatch,
+            displayFlush,
+        ),
+        Watch.Handler.create(
+            file_notifier,
+            notifierDispatch,
+            null,
+        ),
+        // Watch.Handler.create(
+        //     dbus_connection,
+        //     dbusDispatch,
+        //     dbusFlush,
+        // ),
+    });
+    self.* = Context{
         .allocator = allocator,
-        .display = try wl.Display.connect(null),
+        .display = display,
         .outputs = OutputList.init(allocator),
         .scheduler = Scheduler.init(allocator),
+        .watch = watch,
+        .file_notifier = file_notifier,
         .seat = .{ .wl_seat = undefined, .surfaces = Seat.Surfaces.init(allocator) },
         .font_map = font_map,
         .pango_context = pango_context,
     };
+    dbus_connection.setDispatchStatusFunction(
+        dbusDispatch,
+        @ptrCast(self),
+        dbus.Connection.doNothing,
+    );
+    // get any messages first
+    dbusDispatch(dbus_connection, .data_remains, self);
+    _ = dbus_connection.setWatchFunctions(
+        dbusAddWatch,
+        dbusRemoveWatch,
+        dbusToggledWatch,
+        &self.watch,
+        dbus.Connection.doNothing,
+    );
+    try self.getGlobals();
 }
 
-pub fn getGlobals(self: *@This()) !void {
+pub fn dbusAddWatch(dbus_watch: *dbus.Watch, user_data: *anyopaque) callconv(.C) dbus.dbus_bool_t {
+    const watch: *Watch = @alignCast(@ptrCast(user_data));
+    const flags = dbus_watch.getFlags();
+    // TODO: implement writable properly
+    const events = Watch.Events{
+        .in = (flags & dbus.Watch.READABLE) != 0,
+        // .out = (flags & dbus.Watch.WRITABLE) != 0,
+        .out = false,
+    };
+    log.debug("adding watch, events: 0x{x}", .{@as(i16, @bitCast(events))});
+    watch.addOrModify(
+        .{ .fd = dbus_watch.getFd(), .events = events },
+        .{ .data = dbus_watch, .handle_event = dbusWatchHandle },
+    ) catch {
+        log.warn("out of memory", .{});
+        return 0;
+    };
+    return 1;
+}
+pub fn dbusRemoveWatch(dbus_watch: *dbus.Watch, user_data: *anyopaque) callconv(.C) void {
+    const watch: *Watch = @alignCast(@ptrCast(user_data));
+    _ = watch;
+    _ = dbus_watch;
+    log.debug("remove watch", .{});
+    // watch.add(
+    //     .{ .fd = watch.getFd(), .events = .{ .in = true, .out = true } },
+    //     .{ .data = dbus_watch, .handle_event = dbusWatchHandle },
+    // );
+}
+pub fn dbusToggledWatch(dbus_watch: *dbus.Watch, user_data: *anyopaque) callconv(.C) void {
+    const watch: *Watch = @alignCast(@ptrCast(user_data));
+    _ = watch;
+    _ = dbus_watch;
+    log.debug("toggle watch", .{});
+    // watch.add(
+    //     .{ .fd = watch.getFd(), .events = .{ .in = true, .out = true } },
+    //     .{ .data = dbus_watch, .handle_event = dbusWatchHandle },
+    // );
+}
+pub fn dbusWatchHandle(data: *anyopaque, fd: i32, revents: i16) void {
+    _ = fd;
+    const dbus_watch: *dbus.Watch = @alignCast(@ptrCast(data));
+    const events: Watch.Events = @bitCast(revents);
+    // TODO: implement writable properly
+    const flags = (if (events.in) dbus.Watch.READABLE else 0) | dbus.Watch.WRITABLE;
+    const res = dbus_watch.handle(@intCast(flags));
+    _ = res;
+}
+
+fn getGlobals(self: *@This()) !void {
     const registry = try self.display.getRegistry();
     defer registry.destroy();
     registry.setListener(*Context, registryListener, self);
@@ -78,6 +197,8 @@ pub fn destroy(self: *@This()) void {
     }
     self.outputs.deinit();
     self.display.disconnect();
+    self.file_notifier.close();
+    self.allocator.destroy(self.file_notifier);
 }
 pub fn displayFd(self: *const @This()) c_int {
     return self.display.getFd();
@@ -338,3 +459,42 @@ pub const Seat = struct {
         log.debug("Touch Event: {}", .{event});
     }
 };
+
+pub fn displayDispatch(display: *wl.Display, fd: i32, revents: i16) void {
+    _ = fd;
+    // _ = revents;
+    assert(revents & std.posix.POLL.IN != 0);
+    switch (display.dispatch()) {
+        .SUCCESS => {},
+        else => |err| log.err("wayland display dispatch error: {}", .{err}),
+    }
+}
+pub fn displayFlush(display: *wl.Display, fd: i32) void {
+    _ = fd;
+    // _ = revents;
+    switch (display.flush()) {
+        .SUCCESS => {},
+        else => |err| log.err("wayland display dispatch error: {}", .{err}),
+    }
+}
+
+pub fn notifierDispatch(notifier: *FileNotifier, fd: i32, revents: i16) void {
+    assert(fd == notifier.fd);
+    assert(revents & std.posix.POLL.IN != 0);
+    notifier.readEvents() catch unreachable;
+}
+pub fn dbusDispatch(connection: *dbus.Connection, new_status: dbus.DispatchStatus, data: *anyopaque) callconv(.C) void {
+    _ = data;
+    // assert(revents & std.posix.POLL.IN != 0);
+    switch (new_status) {
+        .data_remains => while (connection.getDispatchStatus() == .data_remains) {
+            connection.dispatch();
+        },
+        .complete => {},
+        .need_memory => {},
+    }
+}
+pub fn dbusFlush(connection: *dbus.Connection, fd: i32) void {
+    _ = fd;
+    connection.flush();
+}

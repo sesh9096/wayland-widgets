@@ -121,6 +121,10 @@ pub fn getLabel(self: *const Self, txt: [:0]const u8, id_gen: IdGenerator) !*Lab
     try widget.configure(txt);
     return widget;
 }
+pub fn label(self: *const Self, txt: [:0]const u8, id_gen: IdGenerator) !void {
+    const widget = try self.getLabel(txt, id_gen);
+    try self.surface.addWidget(widget);
+}
 
 pub fn getButton(self: *const Self, id_gen: IdGenerator) !*Button {
     const widget = try self.surface.getWidget(id_gen, Button);

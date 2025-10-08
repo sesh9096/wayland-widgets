@@ -10,11 +10,13 @@ const Scheduler = @import("./Scheduler.zig");
 const Task = Scheduler.Task;
 const Surface = @import("./Surface.zig");
 pub const Context = @import("./Context.zig");
+pub const NotificationHandler = @import("./NotificationServer.zig");
 pub const BasicWidgets = @import("./BasicWidgets.zig");
 pub const StatusWidgets = @import("./StatusWidgets.zig");
 pub const Seat = Context.Seat;
 // pub const Windows = std.ArrayList(Window);
 const c = common.c;
+const dbus = common.dbus;
 const FileNotifier = common.FileNotifier;
 
 const Options = struct {
@@ -36,9 +38,18 @@ pub fn main() !void {
     // var buf: [4096]u8 = undefined;
     // var fba = std.heap.FixedBufferAllocator.init(&buf);
     // const allocator = fba.allocator();
-    var context = try Context.init(allocator);
+    var context: Context = undefined;
+    try context.configure(allocator);
+    // try context.getGlobals();
     defer context.destroy();
-    try context.getGlobals();
+    const dbus_connection = dbus.busGet(.session, null).?;
+    var err: dbus.Error = .{};
+    const ret = dbus_connection.requestName("org.testing.tester", 0, &err);
+    _ = ret;
+    var notification_handler = NotificationHandler.init(allocator);
+    try dbus_connection.registerObject(&notification_handler);
+    // _ = dbus_connection.registerObjectPath("/", &.{ .message_function = dbus.printFilter }, undefined);
+    // log.debug("{s}", .{dbus.introspection.fromType(NotificationHandler)});
 
     const options = Options.parseArgs();
     _ = options;
@@ -69,6 +80,19 @@ pub fn main() !void {
     );
     const bar = bar_layer.getSurface();
 
+    var notification_layer: LayerSurface = undefined;
+    try notification_layer.init(
+        &context,
+        .top,
+        null,
+        "notifications",
+        .{ .x = 100, .y = 100 },
+        .{ .top = true, .right = true },
+        .ignore,
+    );
+    const notification_surface = notification_layer.getSurface();
+    notification_handler.notifications.setOnReceive(notification_surface, @ptrFromInt(@intFromPtr(&markDirty)));
+
     // .layer = .background,
     // .anchor = .{ .top = true, .bottom = true, .left = true, .right = true },
     // .exclusive = .ignore,
@@ -87,21 +111,12 @@ pub fn main() !void {
     var sw: StatusWidgets = undefined;
     try sw.configure(bar, scheduler, &file_notifier);
     var bw = BasicWidgets.init(surface);
+    var nbw = BasicWidgets.init(notification_surface);
     try frame(&bw);
     try drawBar(&sw);
+    try drawNotifications(&nbw, &notification_handler);
+    // var dbus_connection = dbus.busGet(.session, &err.?);
 
-    var pollfds = [_]std.posix.pollfd{
-        .{
-            .events = std.posix.POLL.IN,
-            .fd = context.displayFd(),
-            .revents = 0,
-        },
-        .{
-            .events = std.posix.POLL.IN,
-            .fd = file_notifier.fd,
-            .revents = 0,
-        },
-    };
     log.info("Starting event loop", .{});
     while (true) {
         // log.debug("starting poll", .{});
@@ -112,29 +127,13 @@ pub fn main() !void {
         if (bar.updated) {
             try drawBar(&sw);
         }
-        if (context.display.flush() != .SUCCESS) return error.DispatchFailed;
-        // wait for events
-        switch (try std.posix.poll(&pollfds, timeout orelse 1)) {
-            0 => {
-                // timeout
-            },
-            else => |num_events| {
-                var num_events_remaining = num_events;
-                if (pollfds[0].revents != 0) {
-                    num_events_remaining -= 1;
-                    if (context.display.dispatch() != .SUCCESS) return error.DispatchFailed;
-                }
-                if (pollfds[1].revents != 0) {
-                    num_events_remaining -= 1;
-                    log.debug("got inotify events 0x{x}", .{pollfds[1].revents});
-                    try file_notifier.readEvents();
-                }
-                assert(num_events_remaining == 0);
-            },
+        if (notification_surface.updated) {
+            try drawNotifications(&nbw, &notification_handler);
         }
+        if (context.display.flush() != .SUCCESS) return error.DispatchFailed;
+        try context.watch.wait(timeout orelse 10000);
     }
 }
-
 pub fn frame(bw: *BasicWidgets) !void {
     var buf: [64]u8 = undefined;
     const s = bw.surface;
@@ -185,10 +184,29 @@ fn drawBar(sw: *StatusWidgets) !void {
     }
 }
 
+fn drawNotifications(bw: *BasicWidgets, notification_handler: *NotificationHandler) !void {
+    log.debug("drawing notifications", .{});
+    const s = bw.surface;
+    s.beginFrame();
+    s.clear(.{ .a = 0 });
+    defer s.endFrame();
+    {
+        const box = try bw.column(.{ .src = @src() });
+        defer box.end();
+        for (notification_handler.notifications.notification_list.items) |notification| {
+            const column = try bw.column(.{ .src = @src(), .extra = notification.id });
+            defer column.end();
+            try bw.label(notification.summary, .{ .ptr = @ptrCast(notification.summary) });
+            try bw.label(notification.body, .{ .ptr = @ptrCast(notification.body) });
+        }
+    }
+}
+
 pub fn markDirty(surface: *Surface) void {
-    surface.redraw = true;
+    surface.updated = true;
 }
 
 test {
     _ = common;
+    _ = common.dbus;
 }

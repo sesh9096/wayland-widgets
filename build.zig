@@ -38,6 +38,7 @@ pub fn build(b: *std.Build) void {
     exe.linkSystemLibrary("wayland-client");
     exe.linkSystemLibrary("cairo");
     exe.linkSystemLibrary("pangocairo");
+    exe.linkSystemLibrary("dbus-1");
 
     b.installArtifact(exe);
 
@@ -60,6 +61,8 @@ pub fn build(b: *std.Build) void {
     });
 
     unit_tests.root_module.addImport("wayland", wayland);
+    unit_tests.linkLibC();
+    unit_tests.linkSystemLibrary("dbus-1");
     const run_unit_tests = b.addRunArtifact(unit_tests);
 
     const test_step = b.step("test", "Run tests");
