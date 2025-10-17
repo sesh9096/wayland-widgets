@@ -14,7 +14,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies
-        run: sudo apt-get install libcairo2-dev libpango1.0-dev pkg-config wayland-protocols libwayland-bin libwayland-dev
+        run: sudo apt-get install libcairo2-dev libpango1.0-dev pkg-config wayland-protocols libwayland-bin libwayland-dev dbus libdbus-1-3 libdbus-1-dev
       - name: Setup Zig Compiler
         uses: mlugg/setup-zig@v2
         with:
