@@ -24,10 +24,10 @@ const WidgetList = std.ArrayList(Widget);
 wl_surface: *wl.Surface,
 wl_shm: *wl.Shm,
 shared_memory: []align(std.mem.page_size) u8 = &.{},
-size: UVec2,
 buffers: [2]Buffer,
 current_buffer: u1 = 0,
-request_resize: *const fn (self: *Self, size: Vec2) bool = requestResizeExample,
+size: UVec2,
+request_resize: *const fn (self: *Self, size: UVec2) void = requestResizeExample,
 widget: ?Widget = null,
 widget_storage: WidgetFromId,
 allocator: std.mem.Allocator,
@@ -137,15 +137,19 @@ pub fn configure(
     try self.seat.registerSurface(self);
 }
 
-pub fn resize(self: *Self, width: i32, height: i32) !void {
+pub const ResizeError = std.posix.TruncateError || std.posix.MemFdCreateError || std.posix.MMapError;
+
+/// set size, reallocate memory if needed, notify compositor
+pub fn resize(self: *Self, width: i32, height: i32) ResizeError!void {
     // if are resizing to the same size, we don't need to do anything
     if (self.size.x == width and self.size.y == height) return;
+    self.updated = true;
     if (self.shared_memory.len != 0) {
         try self.destroyBuffers();
     }
     // if we have no area, we do not need buffers
     self.size = .{ .x = @intCast(width), .y = @intCast(height) };
-    if (width * height <= 0) return;
+    if (width <= 0 or height <= 0) return;
 
     const cairo_format = .ARGB32;
     const stride = cairo.formatStrideForWidth(cairo_format, width);
@@ -197,10 +201,7 @@ pub fn destroyBuffers(self: *Self) !void {
     self.shared_memory = &.{};
     self.current_buffer = 0;
 }
-pub fn requestResizeExample(_: *Self, _: Vec2) bool {
-    // resizes not possible
-    return false;
-}
+pub fn requestResizeExample(_: *Self, _: UVec2) void {}
 
 pub fn notify(self: *Self, event: anytype) void {
     self.updated = true;
@@ -303,20 +304,26 @@ pub fn endFrame(self: *Self) void {
     //     widget.draw(Rect{ .w = @floatFromInt(self.width), .h = @floatFromInt(self.height) }) catch {};
     // }
     if (self.widget == null) return;
-    const rect = self.size.toRectSize();
+    const surface_size = self.size.toVec2();
     // check if we were resized and need to redraw everything
     const root = self.widget.?;
-    if (!(std.meta.eql(root.getMetadata().rect, rect))) {
+    const root_size = root.getMetadata().size;
+    // log.debug("{} {}", .{ surface_size, root_size });
+    if (!(std.meta.eql(root_size, surface_size))) {
+        if (root_size.larger(surface_size)) {
+            self.request_resize(self, root_size.toUVec2());
+            // self.resize(@intFromFloat(root_size.x), @intFromFloat(root_size.y)) catch |err| log.err("{}", .{err});
+        }
         // log.debug("full redraw, {}", .{rect.getSize()});
         self.redraw_list.clearRetainingCapacity();
         self.redraw_list.append(root) catch unreachable; // root should already be in the list
-        root.getMetadata().rect = rect;
+        root.getMetadata().rect = surface_size.toRectSize();
     }
     for (self.redraw_list.items) |widget| {
         // TODO: draw widgets which appear on top and below if needed
         // Rect{ .w = @floatFromInt(self.width), .h = @floatFromInt(self.height) }
         const md = widget.getMetadata();
-        // log.debug("redrawing {} at {}, size: {}", .{ widget, md.rect.point(), md.rect.size() });
+        // log.debug("redrawing {} at {}, size: {}", .{ widget, md.rect.point(), md.rect.getSize() });
         self.clip = md.rect;
         const cr = self.getCairoContext();
         cr.clipRect(self.clip);

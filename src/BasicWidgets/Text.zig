@@ -7,6 +7,7 @@ const Widget = common.Widget;
 const cairo = common.cairo;
 const pango = common.pango;
 const Rect = common.Rect;
+const Vec2 = common.Vec2;
 const Self = @This();
 
 md: Widget.Metadata,
@@ -52,12 +53,12 @@ pub fn draw(self: *Self) !void {
     // log.debug("Drawing text {s} at {} {}, {}", .{ text, rect.x, rect.y, rect.size() });
 }
 
-pub fn proposeSize(self: *Self, rect: *Rect) void {
+pub fn proposeSize(self: *Self, size: *Vec2) void {
     var irect: common.IRect = undefined;
-    rect.w = if (rect.w == 0) 300 else rect.w;
-    self.layout.setWidth(@intFromFloat(rect.w * pango.SCALE));
+    size.x = if (size.x == 0) 300 else size.x;
+    self.layout.setWidth(@intFromFloat(size.x * pango.SCALE));
     _ = self.layout.getPixelExtents(null, &irect);
-    rect.h = @floatFromInt(irect.h);
+    size.y = @floatFromInt(irect.h);
 }
 
 pub const vtable = Widget.Vtable.forType(Self);

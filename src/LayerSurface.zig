@@ -26,7 +26,7 @@ margins: Margins = .{},
 output: ?*Context.Output = null,
 exclusive: ExclusiveOption = .move,
 surface: Surface = undefined,
-desired_size: common.UVec2 = .{},
+min_size: common.UVec2 = .{},
 
 pub const ExclusiveOption = enum { ignore, move, exclude };
 
@@ -53,7 +53,7 @@ pub fn init(
     exclusive: ExclusiveOption,
 ) !void {
     try self.configure(context, layer, output_name, namespace);
-    try self.setSize(size);
+    self.setSize(size);
     self.setAnchor(anchor);
     self.setExclusive(exclusive);
     self.surface.wl_surface.commit();
@@ -82,6 +82,7 @@ fn configure(
     self.namespace = namespace;
     self.layer_surface = layer_surface;
     try self.surface.configure(context.allocator, context.shm, &context.seat, wl_surface);
+    self.surface.request_resize = setSizeSurface;
 }
 
 fn updateExclusive(self: *Self) void {
@@ -111,13 +112,15 @@ pub fn setAnchor(self: *Self, anchor: wlr.LayerSurfaceV1.Anchor) void {
     self.layer_surface.setAnchor(anchor);
     self.updateExclusive();
 }
-pub fn setSize(self: *Self, size: UVec2) !void {
-    const width = size.x;
-    const height = size.y;
-    self.layer_surface.setSize(width, height);
-    self.desired_size = .{ .x = width, .y = height };
-    try self.surface.resize(@intCast(width), @intCast(height));
-    self.updateExclusive();
+pub fn setSize(self: *Self, size: UVec2) void {
+    self.layer_surface.setSize(size.x, size.y);
+    self.min_size = size;
+    // try self.surface.resize(@intCast(width), @intCast(height));
+}
+pub fn setSizeSurface(surface: *Surface, size: UVec2) void {
+    const self: *Self = @fieldParentPtr("surface", surface);
+    // log.debug("{}, {}", .{ @max(size.x, self.min_size.x), @max(size.y, self.min_size.y) });
+    self.layer_surface.setSize(@max(size.x, self.min_size.x), @max(size.y, self.min_size.y));
 }
 pub fn getSurface(self: *Self) *Surface {
     return &self.surface;
@@ -126,15 +129,21 @@ pub fn getSurface(self: *Self) *Surface {
 pub fn listener(layer_surface: *wlr.LayerSurfaceV1, event: wlr.LayerSurfaceV1.Event, self: *Self) void {
     switch (event) {
         .configure => |data| {
-            // log.debug("Acking layer surface configure", .{});
+            // log.debug("Acking layer surface configure, {}", .{data});
+            // const w: u32 = if (self.min_size.x == 0) data.width else self.min_size.x;
+            // const h: u32 = if (self.min_size.y == 0) data.height else self.min_size.y;
+            self.surface.resize(@intCast(data.width), @intCast(data.height)) catch return;
             layer_surface.ackConfigure(data.serial);
-            const w: u32 = if (self.desired_size.x == 0) data.width else self.desired_size.x;
-            const h: u32 = if (self.desired_size.y == 0) data.height else self.desired_size.y;
-            self.layer_surface.setSize(w, h);
-            self.surface.resize(@intCast(w), @intCast(h)) catch unreachable;
+            self.layer_surface.setSize(data.width, data.height);
+            self.updateExclusive();
 
             // wl_surface.commit();
         },
         else => {},
     }
+}
+
+pub fn surfaceRequestResize(surface: *Surface, new_size: common.UVec2) bool {
+    const self: *Self = @fieldParentPtr("surface", surface);
+    self.setSize(new_size);
 }

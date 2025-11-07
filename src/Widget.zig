@@ -18,6 +18,7 @@ pub const Metadata = struct {
     parent: ?Widget = null,
     surface: *Surface,
     style: *const Style,
+    size: Vec2 = .{},
     rect: Rect = .{},
     in_frame: bool = false,
     updated: bool = false,
@@ -83,7 +84,7 @@ pub const Vtable = struct {
     handleInput: *const fn (self: *anyopaque) anyerror!void = handleInputDefault,
     /// Propose a size to the parent by setting w/h of `widget.rect`.
     /// Can check children first if desired
-    proposeSize: *const fn (self: *anyopaque, rect: *Rect) void = proposeSizeDefault,
+    proposeSize: *const fn (self: *anyopaque, size: *Vec2) void = proposeSizeDefault,
     /// number of bytes to add to base pointer to get metadata
     metadata_offset: u64 = 0,
     /// debug info
@@ -108,9 +109,9 @@ pub const Vtable = struct {
     pub fn handleInputDefault(_: *anyopaque) !void {}
 
     /// propose a size of nothing by default
-    pub fn proposeSizeDefault(_: *anyopaque, rect: *Rect) void {
-        rect.w = 0;
-        rect.h = 0;
+    pub fn proposeSizeDefault(_: *anyopaque, size: *Vec2) void {
+        size.x = 0;
+        size.y = 0;
     }
 
     pub inline fn forType(T: type) Vtable {
@@ -209,9 +210,9 @@ pub fn draw(widget: Widget, bounding_box: Rect) anyerror!void {
 
 /// helper function to check on change if we need parent to resize
 pub fn needResize(widget: Widget) bool {
-    var rect: Rect = .{};
-    widget.vtable.proposeSize(widget.ptr, &rect);
-    return rect.larger(widget.getMetadata().rect);
+    const md = widget.getMetadata();
+    widget.vtable.proposeSize(widget.ptr, &md.size);
+    return md.size.larger(md.rect.getSize());
 }
 
 pub fn removeChild(widget: Widget, child: Widget) !void {
@@ -241,8 +242,8 @@ pub fn updated(wid: anytype) !void {
         } else {
             if (surface.widget != null and std.meta.eql(widget, surface.widget.?)) {
                 try surface.redraw_list.append(widget);
-                // TODO: resize
-                log.err("Surface too small to draw widget, has size {}, needs size {}", .{ surface.size, md.rect.getSize() });
+                // handled by surface when drawing
+                // log.err("Surface too small to draw widget, has size {}, needs size {}", .{ surface.size, md.rect.getSize() });
             }
         }
     } else {
@@ -252,15 +253,4 @@ pub fn updated(wid: anytype) !void {
 
 pub fn format(value: Widget, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
     try writer.print("{s}@{x}", .{ value.vtable.type_name, @intFromPtr(value.ptr) });
-}
-
-pub fn hasParent(self: Widget, possible_parent: Widget) bool {
-    var widget = self;
-    while (widget.getMetadata().parent) |parent| {
-        if (std.meta.eql(parent, possible_parent)) {
-            return true;
-        }
-        widget = parent;
-    }
-    return false;
 }

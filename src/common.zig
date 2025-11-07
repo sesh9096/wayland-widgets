@@ -36,6 +36,12 @@ pub const Vec2 = struct {
     pub fn toRectSize(v: Vec2) Rect {
         return Rect{ .w = v.x, .h = v.y };
     }
+    pub fn toUVec2(v: Vec2) UVec2 {
+        return .{ .x = @intFromFloat(v.x), .y = @intFromFloat(v.y) };
+    }
+    pub fn larger(a: Vec2, b: Vec2) bool {
+        return a.y > b.y or a.x > b.x;
+    }
 };
 pub const UVec2 = struct {
     x: u32 = 0,
@@ -48,6 +54,9 @@ pub const UVec2 = struct {
     }
     pub fn format(value: UVec2, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
         try writer.print("({}, {})", .{ value.x, value.y });
+    }
+    pub fn toVec2(v: UVec2) Vec2 {
+        return .{ .x = @floatFromInt(v.x), .y = @floatFromInt(v.y) };
     }
     pub fn toRectSize(v: UVec2) Rect {
         return Rect{ .w = @floatFromInt(v.x), .h = @floatFromInt(v.y) };
@@ -134,6 +143,12 @@ pub const IRect = extern struct {
             .h = @floatFromInt(self.h),
         };
     }
+    pub fn getSizeVec2(self: IRect) Vec2 {
+        return .{
+            .x = @floatFromInt(self.w),
+            .y = @floatFromInt(self.h),
+        };
+    }
 };
 
 pub const KeyState = enum {
@@ -182,7 +197,9 @@ pub const Expand = enum {
 };
 
 pub const hash = std.hash.CityHash32.hash;
+/// if slice, hash slice data. Otherwise hash input directly
 pub fn hash_any(input: anytype) u32 {
+    if (@typeInfo(@TypeOf(input)) == .Pointer and @typeInfo(@TypeOf(input)).Pointer.size == .Slice) return hash(std.mem.sliceAsBytes(input));
     var ret: []const u8 = undefined;
     ret.ptr = @ptrCast(&input);
     ret.len = @sizeOf(@TypeOf(input));

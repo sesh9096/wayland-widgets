@@ -72,15 +72,15 @@ pub fn handleInput(self: *Self) !void {
         }
     }
 }
-pub fn proposeSize(self: *Self, rect: *Rect) void {
+pub fn proposeSize(self: *Self, size: *Vec2) void {
     if (self.child) |child| {
-        const child_rect = &child.getMetadata().rect;
-        child.vtable.proposeSize(child.ptr, child_rect);
-        rect.w = child_rect.w;
-        rect.h = child_rect.h;
+        const child_size = &child.getMetadata().size;
+        child.vtable.proposeSize(child.ptr, size);
+        size.x = child_size.x;
+        size.y = child_size.y;
     } else {
-        rect.w = 1;
-        rect.h = 1;
+        size.x = 1;
+        size.y = 1;
     }
 }
 pub const default_style = Style{

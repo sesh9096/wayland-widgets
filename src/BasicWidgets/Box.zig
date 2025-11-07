@@ -48,13 +48,11 @@ pub fn childAction(self: *Self, action: Widget.Action, child: Widget) !void {
             }
         },
         .updated => {
+            try Widget.updated(self);
             if (indexOfWidget(children.*, child)) |index| {
-                try Widget.updated(self);
                 _ = index;
             } else {
-                if (children.items.len < children.capacity and std.meta.eql(children.items.ptr[children.items.len], child)) {
-                    try Widget.updated(self);
-                } else return error.InvalidChild;
+                if (children.items.len < children.capacity and std.meta.eql(children.items.ptr[children.items.len], child)) {} else return error.InvalidChild;
             }
         },
     }
@@ -62,32 +60,25 @@ pub fn childAction(self: *Self, action: Widget.Action, child: Widget) !void {
 pub fn getChildren(self: *Self) []Widget {
     return self.children.items;
 }
-pub fn proposeSize(self: *Self, rect: *Rect) void {
+pub fn proposeSize(self: *Self, size: *Vec2) void {
     // TODO: iterate
     switch (self.orientation) {
-        .horizontal => {
+        inline else => |orientation| {
             var w: f32 = 0;
             var h: f32 = 0;
             for (self.children.items) |child| {
                 const md = child.getMetadata();
-                child.vtable.proposeSize(child.ptr, &md.rect);
-                w += md.rect.w;
-                h = @max(h, md.rect.h);
+                child.vtable.proposeSize(child.ptr, &md.size);
+                if (orientation == .horizontal) {
+                    w += md.size.x;
+                    h = @max(h, md.size.y);
+                } else {
+                    w = @max(w, md.size.x);
+                    h += md.size.y;
+                }
             }
-            rect.h = h;
-            rect.w = w;
-        },
-        .vertical => {
-            var w: f32 = 0;
-            var h: f32 = 0;
-            for (self.children.items) |child| {
-                const md = child.getMetadata();
-                child.vtable.proposeSize(child.ptr, &md.rect);
-                w = @max(w, md.rect.w);
-                h += md.rect.h;
-            }
-            rect.h = h;
-            rect.w = w;
+            size.x = w;
+            size.y = h;
         },
     }
 }
@@ -104,10 +95,10 @@ pub fn draw(self: *Self) !void {
             var min_width: f32 = 0;
             var total_weight: f32 = 0;
             for (self.children.items) |child| {
-                if (child.getMetadata().rect.w == 0) {
+                if (child.getMetadata().size.x == 0) {
                     total_weight += 1;
                 } else {
-                    min_width += child.getMetadata().rect.w;
+                    min_width += child.getMetadata().size.x;
                 }
             }
             const remaining_space = rect.w - min_width;
@@ -116,7 +107,7 @@ pub fn draw(self: *Self) !void {
             // expand items
             for (self.children.items) |child| {
                 const weight = 1;
-                const child_width = child.getMetadata().rect.w;
+                const child_width = child.getMetadata().size.x;
                 rect.w = if (hexpand or child_width == 0) scale * weight else child_width;
                 try child.draw(rect);
                 rect.x = rect.x + rect.w;
@@ -126,10 +117,10 @@ pub fn draw(self: *Self) !void {
             var min_width: f32 = 0;
             var total_weight: f32 = 0;
             for (self.children.items) |child| {
-                if (child.getMetadata().rect.h == 0) {
+                if (child.getMetadata().size.y == 0) {
                     total_weight += 1;
                 } else {
-                    min_width += child.getMetadata().rect.h;
+                    min_width += child.getMetadata().size.y;
                 }
             }
             const remaining_space = rect.h - min_width;
@@ -137,7 +128,7 @@ pub fn draw(self: *Self) !void {
             const scale = remaining_space / total_weight;
             for (self.children.items) |child| {
                 const weight = 1;
-                const child_height = child.getMetadata().rect.h;
+                const child_height = child.getMetadata().size.y;
                 rect.h = if (vexpand or child_height == 0) scale * weight else child_height;
                 try child.draw(rect);
                 rect.y = rect.y + rect.h;
