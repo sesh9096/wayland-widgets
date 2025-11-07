@@ -4,6 +4,7 @@ const Allocator = std.mem.Allocator;
 const common = @import("common.zig");
 const dbus = common.dbus;
 const Surface = common.Surface;
+const Scheduler = common.Scheduler;
 const IdGenerator = common.IdGenerator;
 pub const BasicWidgets = @import("BasicWidgets.zig");
 const Self = @This();
@@ -59,15 +60,18 @@ pub const NotificationsInterface = struct {
     pub var next_id: u32 = 1;
     pub fn closeExpiredNotifications(self: *NotificationsInterface) void {
         const time = std.time.milliTimestamp();
-        outer: while (true) {
-            for (self.notification_list.items, 0..) |notification, i| {
-                if (notification.expire_time < time) {
-                    self.closeNotification(i, .expired);
-                    continue :outer;
-                }
+        var i: u32 = 0;
+        while (i < self.notification_list.items.len) {
+            const notification = self.notification_list.items[i];
+            if (notification.expire_time < time) {
+                self.closeNotification(i, .expired);
+                continue;
             }
-            break :outer;
+            i += 1;
         }
+    }
+    pub fn registerTasks(self: *NotificationsInterface, scheduler: *Scheduler) !void {
+        try scheduler.addRepeatTask(Scheduler.Task.create(self, closeExpiredNotifications), 1000);
     }
     pub fn closeNotification(self: *NotificationsInterface, index: usize, reason: CloseReason) void {
         const allocator = self.notification_list.allocator;

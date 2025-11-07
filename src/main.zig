@@ -47,6 +47,7 @@ pub fn main() !void {
     const ret = dbus_connection.requestName("org.testing.tester", 0, &err);
     _ = ret;
     var notification_handler = NotificationHandler.init(allocator);
+    try notification_handler.notifications.registerTasks(&context.scheduler);
     try dbus_connection.registerObject(&notification_handler);
     // _ = dbus_connection.registerObjectPath("/", &.{ .message_function = dbus.printFilter }, undefined);
     // log.debug("{s}", .{dbus.introspection.fromType(NotificationHandler)});
@@ -92,6 +93,7 @@ pub fn main() !void {
     );
     const notification_surface = notification_layer.getSurface();
     notification_handler.notifications.setOnReceive(notification_surface, @ptrFromInt(@intFromPtr(&markDirty)));
+    notification_handler.notifications.setOnClose(notification_surface, @ptrFromInt(@intFromPtr(&markDirty)));
 
     // .layer = .background,
     // .anchor = .{ .top = true, .bottom = true, .left = true, .right = true },
@@ -185,7 +187,8 @@ fn drawBar(sw: *StatusWidgets) !void {
 }
 
 fn drawNotifications(bw: *BasicWidgets, notification_handler: *NotificationHandler) !void {
-    log.debug("drawing notifications", .{});
+    const notifications = notification_handler.notifications.notification_list.items;
+    log.debug("drawing {} notifications", .{notifications.len});
     const s = bw.surface;
     s.beginFrame();
     s.clear(.{ .a = 0 });
@@ -193,8 +196,9 @@ fn drawNotifications(bw: *BasicWidgets, notification_handler: *NotificationHandl
     {
         const box = try bw.column(.{ .src = @src() });
         defer box.end();
-        for (notification_handler.notifications.notification_list.items) |notification| {
+        for (notifications) |notification| {
             const column = try bw.column(.{ .src = @src(), .extra = notification.id });
+            // column.md.style = switch(notification.urgency){}
             defer column.end();
             try bw.label(notification.summary, .{ .ptr = @ptrCast(notification.summary) });
             try bw.label(notification.body, .{ .ptr = @ptrCast(notification.body) });
