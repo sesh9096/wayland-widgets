@@ -49,14 +49,22 @@ pub const Color = packed struct(u32) {
     pub const ParseIntError = std.fmt.ParseIntError;
     pub fn fromString(str: [:0]const u8) ParseIntError!Color {
         const hex = if (str[0] == '#') str[1..] else if (str[0] == '0' and str[1] == 'x') str[2..] else str;
-        if (hex.len == 3) {
-            return fromStringShort(hex);
-        }
-        const bits = try std.fmt.parseInt(u32, hex, 16);
-        return if (hex.len == 8) @as(Color, @bitCast(bits)) else @as(Color, @bitCast(bits << 2));
+        return switch (hex.len) {
+            3 => fromStringShort(hex),
+            6, 8 => |len| {
+                const rgb = if (len == 6) hex else hex[2..];
+                return .{
+                    .r = try hex2ToNum(rgb[0..2]),
+                    .g = try hex2ToNum(rgb[2..4]),
+                    .b = try hex2ToNum(rgb[4..6]),
+                    .a = if (len == 6) std.math.maxInt(u8) else try hex2ToNum(hex[0..2]),
+                };
+            },
+            else => return error.Overflow,
+        };
     }
     fn fromStringShort(str: [:0]const u8) ParseIntError!Color {
-        assert(str.len == 3);
+        if (str.len != 3) return error.Overflow;
         return .{
             .r = try hexToNum(str[0]) << 4,
             .g = try hexToNum(str[1]) << 4,
@@ -71,6 +79,9 @@ pub const Color = packed struct(u32) {
             else => ParseIntError.InvalidCharacter,
         };
     }
+    fn hex2ToNum(hex: *const [2]u8) ParseIntError!u8 {
+        return (try hexToNum(hex[0]) << 4) | (try hexToNum(hex[1]));
+    }
     pub fn fromAny(color_any: anytype) !Color {
         return switch (@typeInfo(@TypeOf(color_any))) {
             .Int, .ComptimeInt => @bitCast(@as(u32, color_any)),
@@ -79,11 +90,27 @@ pub const Color = packed struct(u32) {
             else => @compileError("Bad Type of color_any: " ++ @typeName(@TypeOf(color_any))),
         };
     }
-    pub fn fromAnyNoError(color_any: anytype) Color {
-        return fromAny(color_any) catch unreachable;
+    pub inline fn fromAnyComptime(comptime color_any: anytype) Color {
+        comptime {
+            return fromAny(color_any) catch |err| @compileError("Failed to parse " ++ color_any ++ " due to " ++ err);
+        }
+    }
+    pub fn format(self: Color, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+        if (self.a == std.math.maxInt(u8)) {
+            try writer.print("#{x}{x}{x}", .{ self.r, self.g, self.b });
+        } else {
+            try writer.print("#{[a]x}{[r]x}{[g]x}{[b]x}", self);
+        }
     }
 };
-pub const color = Color.fromAnyNoError;
+pub const color = Color.fromAnyComptime;
+test "color parsing" {
+    try std.testing.expectEqual(try Color.fromAny("#123"), Color{ .r = 0x10, .g = 0x20, .b = 0x30 });
+    try std.testing.expectEqual(try Color.fromAny("#123456"), Color{ .r = 0x12, .g = 0x34, .b = 0x56 });
+    try std.testing.expectEqual(try Color.fromAny("#ab102030"), Color{ .a = 0xab, .r = 0x10, .g = 0x20, .b = 0x30 });
+    try std.testing.expectEqual(try Color.fromAny("0xab102030"), Color{ .a = 0xab, .r = 0x10, .g = 0x20, .b = 0x30 });
+    try std.testing.expectEqual(try Color.fromAny("ab102030"), Color{ .a = 0xab, .r = 0x10, .g = 0x20, .b = 0x30 });
+}
 
 /// Override defaults for widget or widgets
 pub const Item = union(enum) {
@@ -133,6 +160,6 @@ pub const Theme = struct {
     }
 };
 
-test "info" {
-    std.debug.print("Style Size: {} bytes\n", .{@sizeOf(Item)});
-}
+// test "info" {
+//     std.debug.print("Style Size: {} bytes\n", .{@sizeOf(Item)});
+// }
