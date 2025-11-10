@@ -32,6 +32,7 @@ pub const Metadata = struct {
         const margin = style.getAttribute(.margin);
         const border_rect = rect.subtractSpacing(margin, margin);
         const border_width = style.getAttribute(.border_width);
+        cr.newPath();
         cr.setLineWidth(border_width);
         cr.roundRect(border_rect, style.getAttribute(.border_radius));
         if (style.getAttributeNullable(.border_color)) |color| {
@@ -42,10 +43,15 @@ pub const Metadata = struct {
             cr.setSourceColor(color);
             cr.fill();
         }
-        return rect.subtractSpacing(padding, padding);
+        return border_rect.subtractSpacing(padding, padding);
     }
+
+    /// sets widget's size adding padding and margins if needed
     pub fn setSize(md: *Metadata, size: Vec2) void {
-        md.rect.setSize(size);
+        const style = md.style;
+        md.size = size
+            .add(Vec2.all(style.getAttribute(.padding) * 2))
+            .add(Vec2.all(style.getAttribute(.margin) * 2));
     }
     pub fn transparent(md: *const Metadata) bool {
         if (md.style.getAttributeNullable(.bg_color)) |color| {
@@ -82,9 +88,9 @@ pub const Vtable = struct {
     draw: *const fn (self: *anyopaque) anyerror!void = drawDefault,
     /// handle input, call the corresponding function on parent if not handled
     handleInput: *const fn (self: *anyopaque) anyerror!void = handleInputDefault,
-    /// Propose a size to the parent by setting w/h of `widget.rect`.
+    /// Propose a size to the parent by setting `widget.size`.
     /// Can check children first if desired
-    proposeSize: *const fn (self: *anyopaque, size: *Vec2) void = proposeSizeDefault,
+    proposeSize: *const fn (self: *anyopaque) void = proposeSizeDefault,
     /// number of bytes to add to base pointer to get metadata
     metadata_offset: u64 = 0,
     /// debug info
@@ -109,10 +115,7 @@ pub const Vtable = struct {
     pub fn handleInputDefault(_: *anyopaque) !void {}
 
     /// propose a size of nothing by default
-    pub fn proposeSizeDefault(_: *anyopaque, size: *Vec2) void {
-        size.x = 0;
-        size.y = 0;
-    }
+    pub fn proposeSizeDefault(_: *anyopaque) void {}
 
     pub inline fn forType(T: type) Vtable {
         var vtable = Vtable{};
@@ -196,8 +199,10 @@ pub fn initWidget(surface: *Surface, T: type) !*T {
     return ptr;
 }
 
+/// asks widget to propose a minimum size and then returns it
 pub fn getSize(widget: Widget) Vec2 {
-    return widget.getMetadata().rect.getSize();
+    widget.vtable.proposeSize(widget.ptr);
+    return widget.getMetadata().size;
 }
 
 /// call widget.vtable.draw on widget, set rectangle, and do some housekeeping
@@ -210,9 +215,7 @@ pub fn draw(widget: Widget, bounding_box: Rect) anyerror!void {
 
 /// helper function to check on change if we need parent to resize
 pub fn needResize(widget: Widget) bool {
-    const md = widget.getMetadata();
-    widget.vtable.proposeSize(widget.ptr, &md.size);
-    return md.size.larger(md.rect.getSize());
+    return widget.getSize().larger(widget.getMetadata().rect.getSize());
 }
 
 pub fn removeChild(widget: Widget, child: Widget) !void {

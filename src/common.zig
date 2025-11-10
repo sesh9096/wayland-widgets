@@ -42,6 +42,15 @@ pub const Vec2 = struct {
     pub fn larger(a: Vec2, b: Vec2) bool {
         return a.y > b.y or a.x > b.x;
     }
+    pub fn all(dim: f32) Vec2 {
+        return .{ .x = dim, .y = dim };
+    }
+    pub fn add(a: Vec2, b: Vec2) Vec2 {
+        return .{ .x = a.x + b.x, .y = a.y + b.y };
+    }
+    pub fn max(a: Vec2, b: Vec2) Vec2 {
+        return .{ .x = @max(a.x, b.x), .y = @max(a.y, b.y) };
+    }
 };
 pub const UVec2 = struct {
     x: u32 = 0,
@@ -298,4 +307,8 @@ test "different types" {
     const id1 = IdGenerator.toId(.{ .type_hash = typeHash(IdGenerator) });
     const id2 = IdGenerator.toId(.{ .type_hash = typeHash(i32) });
     if (id1 == id2) return error.DuplicateId;
+}
+
+test {
+    _ = Style;
 }

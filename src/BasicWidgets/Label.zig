@@ -53,12 +53,12 @@ pub fn draw(self: *Self) !void {
     // log.debug("Drawing text {s} at {} {}", .{ label.text, rect.x, rect.y });
 }
 
-pub fn proposeSize(self: *Self, size: *Vec2) void {
+pub fn proposeSize(self: *Self) void {
     const layout = self.layout;
     var irect: common.IRect = undefined;
     _ = layout.getPixelExtents(null, &irect);
     // irect.w += 10; // why????
-    size.* = irect.getSizeVec2();
+    self.md.setSize(irect.getSizeVec2());
 
     // const attr_list = pango.AttrList.new();
     // defer attr_list.unref();

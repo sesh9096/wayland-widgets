@@ -80,6 +80,9 @@ pub const Context = opaque {
     extern fn cairo_destroy(self: *Context) void;
     pub const destroy = cairo_destroy;
 
+    extern fn cairo_new_path(self: *Context) void;
+    pub const newPath = cairo_new_path;
+
     extern fn cairo_arc(self: *Context, xc: f64, yc: f64, radius: f64, angle1: f64, angle2: f64) void;
     pub const arc = cairo_arc;
 

@@ -49,12 +49,14 @@ pub fn childAction(self: *Self, action: Widget.Action, child: Widget) !void {
 pub fn getChildren(self: *Self) []Widget {
     return self.children.items;
 }
-pub fn proposeSize(self: *Self, size: *Vec2) void {
+pub fn proposeSize(self: *Self) void {
     // TODO: iterate
+    var size = Vec2{};
     for (self.children.items) |child| {
-        child.vtable.proposeSize(child.ptr, &child.getMetadata().size);
+        child.vtable.proposeSize(child.ptr);
+        size = size.max(child.getMetadata().size);
     }
-    _ = size;
+    self.md.size = size;
 }
 pub fn end(self: *Self) void {
     self.md.surface.end(Widget.from(self));

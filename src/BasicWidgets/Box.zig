@@ -60,25 +60,23 @@ pub fn childAction(self: *Self, action: Widget.Action, child: Widget) !void {
 pub fn getChildren(self: *Self) []Widget {
     return self.children.items;
 }
-pub fn proposeSize(self: *Self, size: *Vec2) void {
+pub fn proposeSize(self: *Self) void {
     // TODO: iterate
     switch (self.orientation) {
         inline else => |orientation| {
             var w: f32 = 0;
             var h: f32 = 0;
             for (self.children.items) |child| {
-                const md = child.getMetadata();
-                child.vtable.proposeSize(child.ptr, &md.size);
+                const size = child.getSize();
                 if (orientation == .horizontal) {
-                    w += md.size.x;
-                    h = @max(h, md.size.y);
+                    w += size.x;
+                    h = @max(h, size.y);
                 } else {
-                    w = @max(w, md.size.x);
-                    h += md.size.y;
+                    w = @max(w, size.x);
+                    h += size.y;
                 }
             }
-            size.x = w;
-            size.y = h;
+            self.md.setSize(.{ .x = w, .y = h });
         },
     }
 }

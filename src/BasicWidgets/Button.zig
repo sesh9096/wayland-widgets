@@ -72,16 +72,11 @@ pub fn handleInput(self: *Self) !void {
         }
     }
 }
-pub fn proposeSize(self: *Self, size: *Vec2) void {
-    if (self.child) |child| {
-        const child_size = &child.getMetadata().size;
-        child.vtable.proposeSize(child.ptr, size);
-        size.x = child_size.x;
-        size.y = child_size.y;
-    } else {
-        size.x = 1;
-        size.y = 1;
-    }
+pub fn proposeSize(self: *Self) void {
+    self.md.setSize(if (self.child) |child|
+        child.getSize()
+    else
+        .{ .x = 1, .y = 1 });
 }
 pub const default_style = Style{
     .parent = null,

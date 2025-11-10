@@ -53,12 +53,12 @@ pub fn draw(self: *Self) !void {
     // log.debug("Drawing text {s} at {} {}, {}", .{ text, rect.x, rect.y, rect.size() });
 }
 
-pub fn proposeSize(self: *Self, size: *Vec2) void {
+pub fn proposeSize(self: *Self) void {
     var irect: common.IRect = undefined;
-    size.x = if (size.x == 0) 300 else size.x;
-    self.layout.setWidth(@intFromFloat(size.x * pango.SCALE));
+    const x = if (self.md.rect.w == 0) 300 else self.md.rect.w;
+    self.layout.setWidth(@intFromFloat(x * pango.SCALE));
     _ = self.layout.getPixelExtents(null, &irect);
-    size.y = @floatFromInt(irect.h);
+    self.md.setSize(.{ .x = x, .y = @floatFromInt(irect.h) });
 }
 
 pub const vtable = Widget.Vtable.forType(Self);
