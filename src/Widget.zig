@@ -213,11 +213,6 @@ pub fn draw(widget: Widget, bounding_box: Rect) anyerror!void {
     try widget.vtable.draw(md);
 }
 
-/// helper function to check on change if we need parent to resize
-pub fn needResize(widget: Widget) bool {
-    return widget.getSize().larger(widget.getMetadata().rect.getSize());
-}
-
 pub fn removeChild(widget: Widget, child: Widget) !void {
     return widget.vtable.childAction(widget.ptr, .remove, child);
 }
@@ -235,11 +230,12 @@ pub fn updatedChild(widget: Widget, child: Widget) !void {
 }
 
 /// the contents of the widget has changed requiring a rerender
-pub fn updated(wid: anytype) !void {
+pub fn update(wid: anytype) !void {
     const md = getMetadata(wid);
     const surface = md.surface;
     const widget = from(wid);
-    if (widget.needResize()) {
+
+    if (widget.getSize().larger(widget.getMetadata().rect.getSize())) {
         if (md.parent) |parent| {
             try parent.updatedChild(widget);
         } else {

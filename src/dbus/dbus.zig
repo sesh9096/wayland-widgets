@@ -8,7 +8,7 @@ const assert = std.debug.assert;
 pub const c = @cImport({
     @cInclude("dbus/dbus.h");
 });
-pub const dbus_bool_t = u32;
+pub const dbus_bool_t = enum(u32) { false = 0, true = 1 };
 
 pub const BusType = enum(c_int) {
     session = c.DBUS_BUS_SESSION,
@@ -65,16 +65,19 @@ pub const Connection = opaque {
     pub extern fn dbus_connection_add_filter(connection: *Connection, function: HandleMessageFunction, user_data: ?*anyopaque, free_data_function: ?FreeFunction) dbus_bool_t;
     pub const addFilter = dbus_connection_add_filter;
 
+    pub extern fn dbus_connection_remove_filter(connection: *Connection, function: HandleMessageFunction, user_data: ?*anyopaque) void;
+    pub const removeFilter = dbus_connection_remove_filter;
+
     pub extern fn dbus_bus_request_name(connection: *Connection, name: [*:0]const u8, flags: u32, err: *Error) i32;
     pub const requestName = dbus_bus_request_name;
 
     pub extern fn dbus_bus_release_name(connection: *Connection, name: [*:0]const u8, err: *Error) i32;
     pub const releaseName = dbus_bus_release_name;
 
-    pub extern fn dbus_bus_add_match(connection: *Connection, rule: [*:0]const u8, err: *Error) i32;
+    pub extern fn dbus_bus_add_match(connection: *Connection, rule: [*:0]const u8, err: *Error) void;
     pub const addMatch = dbus_bus_add_match;
 
-    pub extern fn dbus_bus_remove_match(connection: *Connection, rule: [*:0]const u8, err: *Error) i32;
+    pub extern fn dbus_bus_remove_match(connection: *Connection, rule: [*:0]const u8, err: *Error) void;
     pub const removeMatch = dbus_bus_remove_match;
 
     pub extern fn dbus_connection_dispatch(connection: *Connection) void;
@@ -100,7 +103,7 @@ pub const Connection = opaque {
         }
         var err = Error{};
         err.init();
-        if (connection.tryRegisterObjectPath(path, vtable, @ptrCast(object), &err) != 1) {
+        if (connection.tryRegisterObjectPath(path, vtable, @ptrCast(object), &err) != .true) {
             if (std.mem.orderZ(u8, err.name.?, "org.freedesktop.DBus.Error.NoMemory") == .eq) {
                 return error.OutOfMemory;
             } else if (std.mem.orderZ(u8, err.name.?, "org.freedesktop.DBus.Error.ObjectPathInUse") == .eq) {
@@ -355,7 +358,7 @@ pub const MessageIter = extern struct {
         const ptr: *const anyopaque = @ptrCast(if (is_pointer) arg else &arg);
         switch (@typeInfo(T)) {
             .Bool, .Int => {
-                if (iter.appendBasic(ArgType.fromType(T).?, ptr) != 1) return error.OutOfMemory;
+                if (iter.appendBasic(ArgType.fromType(T).?, ptr) != .true) return error.OutOfMemory;
             },
             .Float => |float| {
                 if (float.bits != 64) @compileError("Expected f64");
@@ -377,7 +380,7 @@ pub const MessageIter = extern struct {
                 if (pointer.sentinel) |sentinel| {
                     // Dbus String
                     if (pointer.child == u8 and @as(*const u8, @ptrCast(sentinel)).* == 0)
-                        if (iter.appendBasic(.string, ptr) != 1) return error.OutOfMemory;
+                        if (iter.appendBasic(.string, ptr) != .true) return error.OutOfMemory;
                 }
                 switch (pointer.size) {
                     .One => {
@@ -388,19 +391,65 @@ pub const MessageIter = extern struct {
                         // Assuming Dbus Array
                         var sub_iter: MessageIter = undefined;
                         const signature = getSignature(pointer.child) ++ [_]u8{0};
-                        if (iter.openContainer(.array, signature.ptr, &sub_iter) != 1) return error.OutOfMemory;
+                        if (iter.openContainer(.array, signature.ptr, &sub_iter) != .true) return error.OutOfMemory;
                         for (if (is_pointer) arg.* else arg) |elem|
                             try sub_iter.appendAnytype(elem);
-                        if (iter.closeContainer(&sub_iter) != 1) return error.OutOfMemory;
+                        if (iter.closeContainer(&sub_iter) != .true) return error.OutOfMemory;
                     },
                     .C => @compileError("Intent unclear"),
                 }
             },
-            .Struct => {},
+            .Struct => |data| {
+                // TODO: Dict Entries, struct
+                if (isDictEntry(T)) {
+                    var sub_iter: MessageIter = undefined;
+                    if (iter.openContainer(.dict_entry, null, &sub_iter) != 1) return error.OutOfMemory;
+                    if (iter.closeContainer(&sub_iter) != .true) return error.OutOfMemory;
+                } else {
+                    // struct
+                    var sub_iter: MessageIter = undefined;
+                    if (iter.openContainer(.@"struct", null, &sub_iter) != 1) return error.OutOfMemory;
+                    for (data.fields) |field| {
+                        try sub_iter.appendAnytype(@field(ptr, field.name));
+                    }
+                    if (iter.closeContainer(&sub_iter) != .true) return error.OutOfMemory;
+                }
+                @compileError("Not Implemented");
+            },
             .Enum => |enum_info| {
+                // enum masquerading as a int
                 if (enum_info.tag_type != void) {
-                    if (iter.appendBasic(ArgType.fromType(enum_info.tag_type).?, ptr) != 1) return error.OutOfMemory;
+                    if (iter.appendBasic(ArgType.fromType(enum_info.tag_type).?, ptr) != .true) return error.OutOfMemory;
                 } else @compileError("Cannot convert type " ++ @typeName(T) ++ " to dbus type");
+            },
+            .Union => {
+                if (T == Arg) {
+                    // variant
+                    // TODO: get signature
+                    var sig_buf: [4096]u8 = undefined;
+                    sig_buf[0] = @intCast(@intFromEnum(ptr));
+                    sig_buf[1] = 0;
+                    var sub_iter: MessageIter = undefined;
+                    if (iter.openContainer(.variant, &sig_buf, &sub_iter) != 1) return error.OutOfMemory;
+                    switch (if (is_pointer) arg.* else arg) {
+                        .array => {},
+                        .@"struct" => {},
+                        .variant => {},
+                        inline else => |*field_ptr, tag| {
+                            if (iter.appendBasic(ArgType.fromType(tag).?, field_ptr) != .true) return error.OutOfMemory;
+                        },
+                    }
+                    if (iter.closeContainer(&sub_iter) != .true) return error.OutOfMemory;
+                    // var sub_iter: MessageIter = undefined;
+                    // const signature = getSignature(pointer.child) ++ [_]u8{0};
+                    // if (iter.openContainer(.variant, signature.ptr, &sub_iter) != .true) return error.OutOfMemory;
+                    // switch (if (is_pointer) arg.* else arg) {
+                    //     inline else => |val| try sub_iter.appendAnytype(arg, val),
+                    // }
+                    // if (iter.closeContainer(&sub_iter) != .true) return error.OutOfMemory;
+                } else {
+                    @compileError("Cannot convert type " ++ @typeName(T) ++ " to dbus type");
+                }
             },
             else => {
                 @compileError("Cannot convert type " ++ @typeName(T) ++ " to dbus type");
@@ -540,7 +589,7 @@ pub fn handleMethodCall(interface: anytype, message: *Message, function: anytype
     var iter: MessageIter = undefined;
     _ = message.iterInit(&iter);
 
-    var arena_allocator = std.heap.ArenaAllocator.init(std.heap.raw_c_allocator);
+    var arena_allocator = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     const allocator = arena_allocator.allocator();
     defer _ = arena_allocator.reset(.free_all); // potentially make more efficient?
 
@@ -573,7 +622,7 @@ pub fn handleMethodCall(interface: anytype, message: *Message, function: anytype
                 _ = iter.next();
             }
         }
-        assert(iter.hasNext() == 0);
+        assert(iter.hasNext() == .false);
         break :blk @call(.auto, function, args);
     };
 
@@ -599,7 +648,7 @@ pub fn getObjectHandleMessageFunction(DbusObjectType: type) HandleMessageFunctio
             message: *Message,
             user_data: *anyopaque,
         ) callconv(.C) HandlerResult {
-            log.debug("got message", .{});
+            // log.debug("got message", .{});
             const interface_name = message.getInterface().?;
             const method_name = message.getMember().?;
 
@@ -878,16 +927,60 @@ pub const Arg = union(ArgType) {
             inline .invalid, .byte, .boolean, .int16, .uint16, .int32, .uint32, .int64, .uint64, .double, .string, .object_path, .signature, .unix_fd, .array, .variant, .@"struct", .dict_entry => |*contents| @ptrCast(contents),
         };
     }
+};
+pub fn DictEntry(K: type, V: type) type {
+    return struct { key: K, value: V };
+}
+pub inline fn isDictEntry(T: type) bool {
+    return switch (@typeInfo(T)) {
+        .Struct => |data| std.mem.eql(u8, data.fields[0].name, "key") and std.mem.eql(u8, data.fields[1].name, "value"),
+        else => false,
+    };
+}
 
-    pub fn DictEntry(K: type, V: type) type {
-        return struct { key: K, value: V };
-    }
+pub const PendingCall = opaque {
+    pub extern fn dbus_pending_call_ref(pending: *PendingCall) *PendingCall;
+    pub const ref = dbus_pending_call_ref;
+
+    pub extern fn dbus_pending_call_unref(pending: *PendingCall) void;
+    pub const unref = dbus_pending_call_unref;
+
+    pub const NotifyFunction = *const fn (pending: *PendingCall, user_data: *anyopaque) callconv(.C) void;
+    ///Sets a notification function to be called when the reply is received or the pending call times out.
+    pub extern fn dbus_pending_call_set_notify(pending: *PendingCall, function: NotifyFunction, user_data: *void, free_user_data: ?FreeFunction) dbus_bool_t;
+    pub const setNotify = dbus_pending_call_set_notify;
+
+    /// Cancels the pending call, such that any reply or error received will just be ignored.
+    pub extern fn dbus_pending_call_cancel(pending: *PendingCall) void;
+    pub const cancel = dbus_pending_call_cancel;
+
+    /// Checks whether the pending call has received a reply yet, or not.
+    pub extern fn dbus_pending_call_get_completed(pending: *PendingCall) dbus_bool_t;
+    pub const getCompleted = dbus_pending_call_get_completed;
+
+    /// Gets the reply, or returns NULL if none has been received yet.
+    pub extern fn dbus_pending_call_steal_reply(pending: *PendingCall) ?*Message;
+    pub const stealReply = dbus_pending_call_steal_reply;
+
+    // void 	dbus_pending_call_block (DBusPendingCall *pending)
+    //  	Block until the pending call is completed.
+
+    // dbus_bool_t 	dbus_pending_call_allocate_data_slot (dbus_int32_t *slot_p)
+    //  	Allocates an integer ID to be used for storing application-specific data on any DBusPendingCall.
+
+    // void 	dbus_pending_call_free_data_slot (dbus_int32_t *slot_p)
+    //  	Deallocates a global ID for DBusPendingCall data slots.
+
+    // dbus_bool_t 	dbus_pending_call_set_data (DBusPendingCall *pending, dbus_int32_t slot, void *data, DBusFreeFunction free_data_func)
+    //  	Stores a pointer on a DBusPendingCall, along with an optional function to be used for freeing the data when the data is set again, or when the pending call is finalized.
+
+    // void * 	dbus_pending_call_get_data (DBusPendingCall *pending, dbus_int32_t slot)
+    //  	Retrieves data previously set with dbus_pending_call_set_data().
+
 };
 
-pub const PendingCall = opaque {};
-
 /// Not actually in spec but commonly used
-pub const VardictEntry = Arg.DictEntry([*:0]const u8, Arg);
+pub const VardictEntry = DictEntry([*:0]const u8, Arg);
 pub const Vardict = []VardictEntry;
 
 /// create a function which when called sends a dbus signal.

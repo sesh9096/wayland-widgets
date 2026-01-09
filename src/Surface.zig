@@ -28,6 +28,7 @@ buffers: [2]Buffer,
 current_buffer: u1 = 0,
 size: UVec2,
 request_resize: *const fn (self: *Self, size: UVec2) void = requestResizeExample,
+precommit: ?*const fn (self: *Self) void = null,
 widget: ?Widget = null,
 widget_storage: WidgetFromId,
 allocator: std.mem.Allocator,
@@ -111,20 +112,7 @@ fn fromWlSurface(
     };
     // const buffer = try shm_pool.createBuffer(0, width, height, width * 4, .xrgb8888);
 }
-// pub fn requestResize(_: *Self) !void {}
 
-pub fn configureWithSize(
-    self: *Self,
-    allocator: std.mem.Allocator,
-    wl_shm: *wl.Shm,
-    seat: *Context.Seat,
-    wl_surface: *wl.Surface,
-    width: i32,
-    height: i32,
-) !void {
-    self.configureWithoutSize(self, allocator, wl_shm, seat, wl_surface);
-    self.resize(width, height);
-}
 pub fn configure(
     self: *Self,
     allocator: std.mem.Allocator,
@@ -339,6 +327,7 @@ pub fn endFrame(self: *Self) void {
         //self.wl_surface.damage( 0, 0, math.maxInt(@TypeOf(self.width)), math.maxInt(@TypeOf(self.height)));
     }
     self.currentBuffer().usable = false;
+    if (self.precommit) |precommit| precommit(self);
     self.wl_surface.commit();
     self.redraw_list.clearRetainingCapacity();
     self.seat.transitionState();
@@ -356,6 +345,16 @@ pub fn end(self: *Self, widget: Widget) void {
 pub fn frame(self: *Self) void {
     self.beginFrameRetained();
     self.endFrame();
+}
+/// attaches a null buffer and commits, does not call precommit
+/// this has the result of telling the wayland compositor the surface cannot be shown
+pub fn unmap(self: *Self) void {
+    self.updated = false;
+    self.wl_surface.attach(null, 0, 0);
+    self.wl_surface.commit();
+}
+pub fn remap(self: *Self) void {
+    self.wl_surface.commit();
 }
 
 pub fn markRedraw(self: *Self, widget: Widget) !void {

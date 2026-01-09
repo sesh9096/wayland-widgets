@@ -129,6 +129,13 @@ pub const NotificationsInterface = struct {
         notification.summary = getOwnedString(allocator, args.summary) catch unreachable;
         notification.body = getOwnedString(allocator, args.body) catch unreachable;
         notification.app_name = getOwnedString(allocator, args.app_name) catch unreachable;
+        notification.urgency = .normal;
+        for (args.hints) |hint| {
+            if (std.mem.orderZ(u8, hint.key, "hint") == .eq) {
+                notification.urgency = @enumFromInt(hint.value.uint32);
+            }
+            // else if (std.mem.orderZ(u8, hint.key, "category") == .eq) {getOwnedString(allocator, hint.value.string)}
+        }
         const time = std.time.milliTimestamp();
 
         const default_timeout = 10 * 1000;

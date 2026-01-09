@@ -48,7 +48,7 @@ pub fn childAction(self: *Self, action: Widget.Action, child: Widget) !void {
             }
         },
         .updated => {
-            try Widget.updated(self);
+            try Widget.update(self);
             if (indexOfWidget(children.*, child)) |index| {
                 _ = index;
             } else {
@@ -138,7 +138,7 @@ pub fn end(self: *Self) void {
     self.md.surface.end(Widget.from(self));
     const hash = common.hash_any(self.children.items);
     if (self.hash != hash) {
-        Widget.updated(self) catch unreachable;
+        Widget.update(self) catch unreachable;
         self.hash = hash;
     }
 }

@@ -18,7 +18,7 @@ hash: u32,
 pub const Option = enum { stretch, fit, fill, center, tile };
 pub fn configure(self: *Self, surface: *const cairo.Surface, option: Option) void {
     if (self.surface != surface) {
-        Widget.updated(self) catch unreachable;
+        Widget.update(self) catch unreachable;
         self.surface = surface;
     }
     self.option = option;

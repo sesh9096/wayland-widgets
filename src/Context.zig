@@ -142,9 +142,9 @@ pub fn dbusAddWatch(dbus_watch: *dbus.Watch, user_data: *anyopaque) callconv(.C)
         .{ .data = dbus_watch, .handle_event = dbusWatchHandle },
     ) catch {
         log.warn("out of memory", .{});
-        return 0;
+        return .false;
     };
-    return 1;
+    return .true;
 }
 pub fn dbusRemoveWatch(dbus_watch: *dbus.Watch, user_data: *anyopaque) callconv(.C) void {
     const watch: *Watch = @alignCast(@ptrCast(user_data));

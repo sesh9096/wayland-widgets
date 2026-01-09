@@ -27,6 +27,7 @@ output: ?*Context.Output = null,
 exclusive: ExclusiveOption = .move,
 surface: Surface = undefined,
 min_size: common.UVec2 = .{},
+serial: ?u32 = null,
 
 pub const ExclusiveOption = enum { ignore, move, exclude };
 
@@ -52,21 +53,6 @@ pub fn init(
     anchor: wlr.LayerSurfaceV1.Anchor,
     exclusive: ExclusiveOption,
 ) !void {
-    try self.configure(context, layer, output_name, namespace);
-    self.setSize(size);
-    self.setAnchor(anchor);
-    self.setExclusive(exclusive);
-    self.surface.wl_surface.commit();
-}
-
-/// configures an uninitialized layer surface, requires stable address in memory
-fn configure(
-    self: *Self,
-    context: *Context,
-    layer: wlr.LayerShellV1.Layer,
-    output_name: ?[:0]const u8,
-    namespace: [*:0]const u8,
-) !void {
     const output = if (output_name) |name| (if (context.getOutputWithName(name)) |output| output else blk: {
         log.warn("Layer Surface: output {s} not found", .{name});
         break :blk null;
@@ -81,8 +67,15 @@ fn configure(
     self.output = output;
     self.namespace = namespace;
     self.layer_surface = layer_surface;
+    self.serial = null;
     try self.surface.configure(context.allocator, context.shm, &context.seat, wl_surface);
     self.surface.request_resize = setSizeSurface;
+    self.surface.precommit = precommit;
+
+    self.setSize(size);
+    self.setAnchor(anchor);
+    self.setExclusive(exclusive);
+    self.surface.wl_surface.commit();
 }
 
 fn updateExclusive(self: *Self) void {
@@ -133,7 +126,9 @@ pub fn listener(layer_surface: *wlr.LayerSurfaceV1, event: wlr.LayerSurfaceV1.Ev
             // const w: u32 = if (self.min_size.x == 0) data.width else self.min_size.x;
             // const h: u32 = if (self.min_size.y == 0) data.height else self.min_size.y;
             self.surface.resize(@intCast(data.width), @intCast(data.height)) catch return;
-            layer_surface.ackConfigure(data.serial);
+            // layer_surface.ackConfigure(data.serial);
+            _ = layer_surface;
+            self.serial = data.serial;
             self.layer_surface.setSize(data.width, data.height);
             self.updateExclusive();
 
@@ -146,4 +141,12 @@ pub fn listener(layer_surface: *wlr.LayerSurfaceV1, event: wlr.LayerSurfaceV1.Ev
 pub fn surfaceRequestResize(surface: *Surface, new_size: common.UVec2) bool {
     const self: *Self = @fieldParentPtr("surface", surface);
     self.setSize(new_size);
+}
+
+pub fn precommit(surface: *Surface) void {
+    const self: *@import("LayerSurface.zig") = @fieldParentPtr("surface", surface);
+    if (self.serial) |serial| {
+        self.layer_surface.ackConfigure(serial);
+        self.serial = null;
+    }
 }

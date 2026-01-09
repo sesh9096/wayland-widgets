@@ -32,7 +32,7 @@ pub fn configure(self: *Self, text: [:0]const u8) !void {
         const font_description = self.md.style.getAttribute(.default_font).describe();
         layout.setFontDescription(font_description);
         layout.setText(text, @intCast(text.len));
-        try Widget.updated(self);
+        try Widget.update(self);
         // log.debug("updated text {s}", .{text});
     }
 }

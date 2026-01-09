@@ -186,19 +186,36 @@ fn drawBar(sw: *StatusWidgets) !void {
     }
 }
 
+const notification_styles = std.EnumArray(NotificationHandler.Notification.Urgency, Style).init(.{
+    .low = Style{ .items = &.{.{ .bg_color = Style.color("#008800") }} },
+    .normal = Style{ .items = &.{
+        .{ .border_radius = 4 },
+        .{ .border_width = 2 },
+        .{ .border_color = Style.color("#ffffffff") },
+        .{ .bg_color = Style.color("#80000080") },
+        .{ .padding = 4 },
+        .{ .margin = 4 },
+    } },
+    .critical = Style{ .items = &.{.{ .bg_color = Style.color("#880000") }} },
+});
 fn drawNotifications(bw: *BasicWidgets, notification_handler: *NotificationHandler) !void {
     const notifications = notification_handler.notifications.notification_list.items;
     log.debug("drawing {} notifications", .{notifications.len});
     const s = bw.surface;
+    if (notifications.len == 0) {
+        s.unmap();
+        return;
+    }
     s.beginFrame();
     s.clear(.{ .a = 0 });
     defer s.endFrame();
     {
         const box = try bw.column(.{ .src = @src() });
+        box.md.style = &Style{ .items = &.{.{ .bg_color = Style.color("#80808080") }} };
         defer box.end();
         for (notifications) |notification| {
             const column = try bw.column(.{ .src = @src(), .extra = notification.id });
-            // column.md.style = switch(notification.urgency){}
+            column.md.style = &notification_styles.get(notification.urgency);
             defer column.end();
             try bw.label(notification.summary, .{ .ptr = @ptrCast(notification.summary) });
             try bw.label(notification.body, .{ .ptr = @ptrCast(notification.body) });

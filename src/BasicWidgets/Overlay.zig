@@ -32,7 +32,7 @@ pub fn childAction(self: *Self, action: Widget.Action, child: Widget) !void {
             try self.children.append(child);
         },
         .updated => if (indexOfWidget(self.children, child)) |index| {
-            try Widget.updated(self);
+            try Widget.update(self);
             _ = index;
         } else {
             log.err("children: {}", .{self.children.items.len});
