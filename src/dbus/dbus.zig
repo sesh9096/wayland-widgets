@@ -15,20 +15,22 @@ pub const BusType = enum(c_int) {
 };
 pub extern fn dbus_bus_get(@"type": BusType, @"error": ?*Error) ?*Connection;
 pub const busGet = dbus_bus_get;
+pub const GenericError = error{Failed};
 pub const Connection = opaque {
     pub extern fn dbus_connection_get_unix_fd(connection: *Connection, fd: *c_int) dbus_bool_t;
-
-    pub fn getFd(connection: *Connection) i32 {
+    pub fn getFd(connection: *Connection) GenericError!i32 {
         var fd: i32 = undefined;
-        assert(dbus_connection_get_unix_fd(connection, &fd) == 1);
-        return fd;
+        if (dbus_connection_get_unix_fd(connection, &fd) == .true) return fd;
+        return error.Failed;
     }
 
     pub extern fn dbus_connection_send(connection: *Connection, message: *Message, client_serial: ?*u32) dbus_bool_t;
     pub const send = dbus_connection_send;
 
     pub extern fn dbus_connection_send_with_reply(connection: *Connection, message: *Message, pending_return: ?**PendingCall, timeout_milliseconds: c_int) dbus_bool_t;
-    pub const sendWithReply = dbus_connection_send_with_reply;
+    pub inline fn sendWithReply(connection: *Connection, message: *Message, pending_return: ?**PendingCall, timeout_milliseconds: c_int) bool {
+        return dbus_connection_send_with_reply(connection, message, pending_return, timeout_milliseconds) == .true;
+    }
 
     pub extern fn dbus_connection_send_with_reply_and_block(connection: *Connection, message: *Message, timeout_milliseconds: c_int, err: *Error) ?*Message;
     pub const sendWithReplyAndBlock = dbus_connection_send_with_reply_and_block;
@@ -37,10 +39,14 @@ pub const Connection = opaque {
     pub const flush = dbus_connection_flush;
 
     pub extern fn dbus_connection_register_object_path(connection: *Connection, path: [*:0]const u8, vtable: *const ObjectPathVTable, user_data: *anyopaque) dbus_bool_t;
-    pub const registerObjectPath = dbus_connection_register_object_path;
+    pub inline fn registerObjectPath(connection: *Connection, path: [*:0]const u8, vtable: *const ObjectPathVTable, user_data: *anyopaque) bool {
+        return dbus_connection_register_object_path(connection, path, vtable, user_data) == .true;
+    }
 
     pub extern fn dbus_connection_try_register_object_path(connection: *Connection, path: [*:0]const u8, vtable: *const ObjectPathVTable, user_data: *anyopaque, err: *Error) dbus_bool_t;
-    pub const tryRegisterObjectPath = dbus_connection_try_register_object_path;
+    pub inline fn tryRegisterObjectPath(connection: *Connection, path: [*:0]const u8, vtable: *const ObjectPathVTable, user_data: *anyopaque, err: *Error) bool {
+        return dbus_connection_try_register_object_path(connection, path, vtable, user_data, err) == .true;
+    }
 
     pub extern fn dbus_connection_set_watch_functions(
         connection: *Connection,
@@ -61,7 +67,9 @@ pub const Connection = opaque {
     pub const setDispatchStatusFunction = dbus_connection_set_dispatch_status_function;
 
     pub extern fn dbus_connection_add_filter(connection: *Connection, function: HandleMessageFunction, user_data: ?*anyopaque, free_data_function: ?FreeFunction) dbus_bool_t;
-    pub const addFilter = dbus_connection_add_filter;
+    pub inline fn addFilter(connection: *Connection, function: HandleMessageFunction, user_data: ?*anyopaque, free_data_function: ?FreeFunction) bool {
+        return dbus_connection_add_filter(connection, function, user_data, free_data_function) == .true;
+    }
 
     pub extern fn dbus_connection_remove_filter(connection: *Connection, function: HandleMessageFunction, user_data: ?*anyopaque) void;
     pub const removeFilter = dbus_connection_remove_filter;
@@ -101,7 +109,7 @@ pub const Connection = opaque {
         }
         var err = Error{};
         err.init();
-        if (connection.tryRegisterObjectPath(path, vtable, @ptrCast(object), &err) != .true) {
+        if (!connection.tryRegisterObjectPath(path, vtable, @ptrCast(object), &err)) {
             if (std.mem.orderZ(u8, err.name.?, "org.freedesktop.DBus.Error.NoMemory") == .eq) {
                 return error.OutOfMemory;
             } else if (std.mem.orderZ(u8, err.name.?, "org.freedesktop.DBus.Error.ObjectPathInUse") == .eq) {
@@ -136,10 +144,14 @@ pub const Watch = opaque {
     pub const setData = dbus_watch_set_data;
 
     pub extern fn dbus_watch_handle(watch: *Watch, flags: u32) dbus_bool_t;
-    pub const handle = dbus_watch_handle;
+    pub inline fn handle(watch: *Watch, flags: u32) bool {
+        return dbus_watch_handle(watch, flags) == .true;
+    }
 
     pub extern fn dbus_watch_get_enabled(watch: *Watch) dbus_bool_t;
-    pub const getEnabled = dbus_watch_get_enabled;
+    pub inline fn getEnabled(watch: *Watch) bool {
+        return dbus_watch_get_enabled(watch) == .true;
+    }
 
     pub const READABLE: c_int = 1;
     pub const WRITABLE: c_int = 2;
@@ -229,19 +241,25 @@ pub const Message = opaque {
     pub const getPath = dbus_message_get_path;
 
     pub extern fn dbus_message_set_path(message: *Message, object_path: [*:0]const u8) dbus_bool_t;
-    pub const setPath = dbus_message_set_path;
+    pub inline fn setPath(message: *Message, object_path: [*:0]const u8) bool {
+        return dbus_message_set_path(message, object_path) == .true;
+    }
 
     pub extern fn dbus_message_get_interface(message: *Message) ?[*:0]const u8;
     pub const getInterface = dbus_message_get_interface;
 
     pub extern fn dbus_message_set_interface(message: *Message, iface: [*:0]const u8) dbus_bool_t;
-    pub const setInterface = dbus_message_set_interface;
+    pub inline fn setInterface(message: *Message, iface: [*:0]const u8) bool {
+        return dbus_message_set_interface(message, iface) == .true;
+    }
 
     pub extern fn dbus_message_get_member(message: *Message) ?[*:0]const u8;
     pub const getMember = dbus_message_get_member;
 
     pub extern fn dbus_message_set_member(message: *Message, member: [*:0]const u8) dbus_bool_t;
-    pub const setMember = dbus_message_set_member;
+    pub inline fn setMember(message: *Message, member: [*:0]const u8) bool {
+        return dbus_message_set_member(message, member) == .true;
+    }
 
     pub extern fn dbus_message_get_serial(message: *Message) u32;
     pub const getSerial = dbus_message_get_serial;
@@ -253,16 +271,22 @@ pub const Message = opaque {
     pub const setNoReply = dbus_message_set_no_reply;
 
     pub extern fn dbus_message_get_no_reply(message: *Message) dbus_bool_t;
-    pub const getNoReply = dbus_message_get_no_reply;
+    pub inline fn getNoReply(message: *Message) bool {
+        return dbus_message_get_no_reply(message) == .true;
+    }
 
     pub extern fn dbus_message_get_args(message: *Message, @"error": ?*Error, first_arg_type: ArgType, ...) dbus_bool_t;
     pub const getArgs = dbus_message_get_args;
 
     pub extern fn dbus_message_get_args_valist(message: *Message, @"error": ?*Error, first_arg_type: ArgType, var_args: [*c]std.builtin.VaList) dbus_bool_t;
-    pub const getArgsVaList = dbus_message_get_args_valist;
+    pub inline fn getArgsVaList(message: *Message, @"error": ?*Error, first_arg_type: ArgType, var_args: [*c]std.builtin.VaList) bool {
+        return dbus_message_get_args_valist(message, @"error", first_arg_type, var_args) == .true;
+    }
 
     pub extern fn dbus_message_iter_init(message: *Message, iter: *MessageIter) dbus_bool_t;
-    pub const iterInit = dbus_message_iter_init;
+    pub inline fn iterInit(message: *Message, iter: *MessageIter) bool {
+        return dbus_message_iter_init(message, iter) == .true;
+    }
 
     pub extern fn dbus_message_iter_init_append(message: *Message, iter: *MessageIter) void;
     pub const iterInitAppend = dbus_message_iter_init_append;
@@ -271,7 +295,9 @@ pub const Message = opaque {
     pub const appendArgs = dbus_message_append_args;
 
     pub extern fn dbus_message_append_args_valist(message: ?*Message, first_arg_type: ArgType, var_args: [*c]std.builtin.VaList) dbus_bool_t;
-    pub const appendArgsVaList = dbus_message_append_args_valist;
+    pub inline fn appendArgsVaList(message: ?*Message, first_arg_type: ArgType, var_args: [*c]std.builtin.VaList) bool {
+        return dbus_message_append_args_valist(message, first_arg_type, var_args);
+    }
 
     /// append all fields of struct
     pub fn appendArgsAnytype(message: *Message, args: anytype) Allocator.Error!void {
@@ -318,10 +344,14 @@ pub const MessageIter = extern struct {
     pad3: ?*anyopaque = null,
 
     pub extern fn dbus_message_iter_has_next(iter: *MessageIter) dbus_bool_t;
-    pub const hasNext = dbus_message_iter_has_next;
+    pub inline fn hasNext(iter: *MessageIter) bool {
+        return dbus_message_iter_has_next(iter) == .true;
+    }
 
     pub extern fn dbus_message_iter_next(iter: *MessageIter) dbus_bool_t;
-    pub const next = dbus_message_iter_next;
+    pub inline fn next(iter: *MessageIter) bool {
+        return dbus_message_iter_next(iter) == .true;
+    }
 
     pub extern fn dbus_message_iter_get_arg_type(iter: *MessageIter) ArgType;
     pub const getArgType = dbus_message_iter_get_arg_type;
@@ -342,16 +372,24 @@ pub const MessageIter = extern struct {
     pub const recurse = dbus_message_iter_recurse;
 
     pub extern fn dbus_message_iter_append_basic(iter: *MessageIter, @"type": ArgType, value: *const anyopaque) dbus_bool_t;
-    pub const appendBasic = dbus_message_iter_append_basic;
+    pub inline fn appendBasic(iter: *MessageIter, @"type": ArgType, value: *const anyopaque) bool {
+        return dbus_message_iter_append_basic(iter, @"type", value) == .true;
+    }
 
     pub extern fn dbus_message_iter_append_fixed_array(iter: *MessageIter, element_type: ArgType, value: *const anyopaque, n_elements: c_int) dbus_bool_t;
-    pub const appendFixedArray = dbus_message_iter_append_fixed_array;
+    pub inline fn appendFixedArray(iter: *MessageIter, element_type: ArgType, value: *const anyopaque, n_elements: c_int) bool {
+        return dbus_message_iter_append_fixed_array(iter, element_type, value, n_elements) == .true;
+    }
 
     pub extern fn dbus_message_iter_open_container(iter: *MessageIter, @"type": ArgType, contained_signature: ?[*:0]const u8, sub: *MessageIter) dbus_bool_t;
-    pub const openContainer = dbus_message_iter_open_container;
+    pub inline fn openContainer(iter: *MessageIter, @"type": ArgType, contained_signature: ?[*:0]const u8, sub: *MessageIter) bool {
+        return dbus_message_iter_open_container(iter, @"type", contained_signature, sub) == .true;
+    }
 
     pub extern fn dbus_message_iter_close_container(iter: *MessageIter, sub: *MessageIter) dbus_bool_t;
-    pub const closeContainer = dbus_message_iter_close_container;
+    pub inline fn closeContainer(iter: *MessageIter, sub: *MessageIter) bool {
+        return dbus_message_iter_close_container(iter, sub) == .true;
+    }
 
     pub extern fn dbus_message_iter_abandon_container(iter: *MessageIter, sub: *MessageIter) void;
     pub const abandonContainer = dbus_message_iter_abandon_container;
@@ -378,29 +416,29 @@ pub const MessageIter = extern struct {
         const ptr: *const anyopaque = @ptrCast(if (is_pointer) arg else &arg);
         switch (@typeInfo(T)) {
             .Bool, .Int => {
-                if (iter.appendBasic(ArgType.fromType(T).?, ptr) != .true) return error.OutOfMemory;
+                if (!iter.appendBasic(ArgType.fromType(T).?, ptr)) return error.OutOfMemory;
             },
             .Float => |float| {
                 if (float.bits != 64) @compileError("Expected f64");
-                if (iter.appendBasic(.double, ptr) != .true) return error.OutOfMemory;
+                if (!iter.appendBasic(.double, ptr)) return error.OutOfMemory;
             },
             .Array => |array| {
                 if (array.child == u8 and array.sentinel != null and @as(*u8, array.sentinel.?).* == 0) {
-                    if (iter.appendBasic(.string, ptr) != .true) return error.OutOfMemory;
+                    if (!iter.appendBasic(.string, ptr)) return error.OutOfMemory;
                 } else {
                     var sub_iter: MessageIter = undefined;
                     const signature = getSignature(array.child) ++ [_]u8{0};
-                    if (iter.openContainer(.array, signature.ptr, &sub_iter) != .true) return error.OutOfMemory;
+                    if (!iter.openContainer(.array, signature.ptr, &sub_iter)) return error.OutOfMemory;
                     for (if (is_pointer) arg.* else arg) |elem|
                         try sub_iter.appendAnytype(elem);
-                    if (iter.closeContainer(&sub_iter) != .true) return error.OutOfMemory;
+                    if (!iter.closeContainer(&sub_iter)) return error.OutOfMemory;
                 }
             },
             .Pointer => |pointer| {
                 if (pointer.sentinel) |sentinel| {
                     // Dbus String
                     if (pointer.child == u8 and @as(*const u8, @ptrCast(sentinel)).* == 0)
-                        if (iter.appendBasic(.string, ptr) != .true) return error.OutOfMemory;
+                        if (!iter.appendBasic(.string, ptr)) return error.OutOfMemory;
                 }
                 switch (pointer.size) {
                     .One => {
@@ -411,10 +449,10 @@ pub const MessageIter = extern struct {
                         // Assuming Dbus Array
                         var sub_iter: MessageIter = undefined;
                         const signature = getSignature(pointer.child) ++ [_]u8{0};
-                        if (iter.openContainer(.array, signature.ptr, &sub_iter) != .true) return error.OutOfMemory;
+                        if (!iter.openContainer(.array, signature.ptr, &sub_iter)) return error.OutOfMemory;
                         for (if (is_pointer) arg.* else arg) |elem|
                             try sub_iter.appendAnytype(elem);
-                        if (iter.closeContainer(&sub_iter) != .true) return error.OutOfMemory;
+                        if (!iter.closeContainer(&sub_iter)) return error.OutOfMemory;
                     },
                     .C => @compileError("Intent unclear"),
                 }
@@ -423,23 +461,23 @@ pub const MessageIter = extern struct {
                 // TODO: Dict Entries, struct
                 if (isDictEntry(T)) {
                     var sub_iter: MessageIter = undefined;
-                    if (iter.openContainer(.dict_entry, null, &sub_iter) != .true) return error.OutOfMemory;
-                    if (iter.closeContainer(&sub_iter) != .true) return error.OutOfMemory;
+                    if (!iter.openContainer(.dict_entry, null, &sub_iter)) return error.OutOfMemory;
+                    if (!iter.closeContainer(&sub_iter)) return error.OutOfMemory;
                 } else {
                     // struct
                     var sub_iter: MessageIter = undefined;
-                    if (iter.openContainer(.@"struct", null, &sub_iter) != .true) return error.OutOfMemory;
+                    if (!iter.openContainer(.@"struct", null, &sub_iter)) return error.OutOfMemory;
                     const typed_ptr: *const T = @alignCast(@ptrCast(ptr));
                     inline for (data.fields) |field| {
                         try sub_iter.appendAnytype(@field(typed_ptr, field.name));
                     }
-                    if (iter.closeContainer(&sub_iter) != .true) return error.OutOfMemory;
+                    if (!iter.closeContainer(&sub_iter)) return error.OutOfMemory;
                 }
             },
             .Enum => |enum_info| {
                 // enum masquerading as a int
                 if (enum_info.tag_type != void) {
-                    if (iter.appendBasic(ArgType.fromType(enum_info.tag_type).?, ptr) != .true) return error.OutOfMemory;
+                    if (!iter.appendBasic(ArgType.fromType(enum_info.tag_type).?, ptr)) return error.OutOfMemory;
                 } else @compileError("Cannot convert type " ++ @typeName(T) ++ " to dbus type");
             },
             .Union => {
@@ -451,23 +489,23 @@ pub const MessageIter = extern struct {
                     sig_buf[0] = @intCast(@intFromEnum(typed_ptr.*));
                     sig_buf[1] = 0;
                     var sub_iter: MessageIter = undefined;
-                    if (iter.openContainer(.variant, @ptrCast(&sig_buf), &sub_iter) != .true) return error.OutOfMemory;
+                    if (!iter.openContainer(.variant, @ptrCast(&sig_buf), &sub_iter)) return error.OutOfMemory;
                     switch (if (is_pointer) arg.* else arg) {
                         .array => {},
                         .@"struct" => {},
                         .variant => {},
                         inline else => |*field_ptr, tag| {
-                            if (iter.appendBasic(tag, @ptrCast(field_ptr)) != .true) return error.OutOfMemory;
+                            if (!iter.appendBasic(tag, @ptrCast(field_ptr))) return error.OutOfMemory;
                         },
                     }
-                    if (iter.closeContainer(&sub_iter) != .true) return error.OutOfMemory;
+                    if (!iter.closeContainer(&sub_iter)) return error.OutOfMemory;
                     // var sub_iter: MessageIter = undefined;
                     // const signature = getSignature(pointer.child) ++ [_]u8{0};
-                    // if (iter.openContainer(.variant, signature.ptr, &sub_iter) != .true) return error.OutOfMemory;
+                    // if(!iter.openContainer(.variant, signature.ptr, &sub_iter)) return error.OutOfMemory;
                     // switch (if (is_pointer) arg.* else arg) {
                     //     inline else => |val| try sub_iter.appendAnytype(arg, val),
                     // }
-                    // if (iter.closeContainer(&sub_iter) != .true) return error.OutOfMemory;
+                    // if(!iter.closeContainer(&sub_iter)) return error.OutOfMemory;
                 } else {
                     @compileError("Cannot convert type " ++ @typeName(T) ++ " to dbus type");
                 }
@@ -699,7 +737,7 @@ pub fn handleMethodCall(interface: anytype, message: *Message, function: anytype
                 _ = iter.next();
             }
         }
-        assert(iter.hasNext() == .false);
+        assert(!iter.hasNext());
         break :blk @call(.auto, function, args);
     };
 
@@ -829,9 +867,9 @@ pub fn methodGet(message: *Message, dbus_object: anytype) *Message {
                     var iter: MessageIter = undefined;
                     reply.iterInitAppend(&iter);
                     var sub_iter: MessageIter = undefined;
-                    if (iter.openContainer(.variant, getSignature(@typeInfo(@TypeOf(function)).Fn.return_type.?), &sub_iter) != .true) return message.newError(c.DBUS_ERROR_NO_MEMORY, "Out of Memory").?;
+                    if (!iter.openContainer(.variant, getSignature(@typeInfo(@TypeOf(function)).Fn.return_type.?), &sub_iter)) return message.newError(c.DBUS_ERROR_NO_MEMORY, "Out of Memory").?;
                     sub_iter.appendAnytype(function(interface_pointer)) catch return message.newError(c.DBUS_ERROR_NO_MEMORY, "Out of Memory").?;
-                    if (iter.closeContainer(&sub_iter) != .true) return message.newError(c.DBUS_ERROR_NO_MEMORY, "Out of Memory").?;
+                    if (!iter.closeContainer(&sub_iter)) return message.newError(c.DBUS_ERROR_NO_MEMORY, "Out of Memory").?;
                     return reply;
                 }
             }
@@ -864,7 +902,7 @@ pub fn methodGetAll(message: *Message, dbus_object: anytype) *Message {
             var iter: MessageIter = undefined;
             var array_iter: MessageIter = undefined;
             reply.iterInitAppend(&iter);
-            if (iter.openContainer(.array, "{sv}", &array_iter) != .true) return message.newError(c.DBUS_ERROR_NO_MEMORY, "Out of Memory").?;
+            if (!iter.openContainer(.array, "{sv}", &array_iter)) return message.newError(c.DBUS_ERROR_NO_MEMORY, "Out of Memory").?;
 
             const interface_pointer = if (@typeInfo(@TypeOf(@field(dbus_object, field.name))) == .Pointer) @field(dbus_object, field.name) else &@field(dbus_object, field.name);
             const InterfaceType = @typeInfo(@TypeOf(interface_pointer)).Pointer.child;
@@ -875,18 +913,18 @@ pub fn methodGetAll(message: *Message, dbus_object: anytype) *Message {
                     var dict_iter: MessageIter = undefined;
                     var variant_iter: MessageIter = undefined;
                     reply.iterInitAppend(&iter);
-                    if (array_iter.openContainer(.dict_entry, null, &dict_iter) != .true) return message.newError(c.DBUS_ERROR_NO_MEMORY, "Out of Memory").?;
+                    if (!array_iter.openContainer(.dict_entry, null, &dict_iter)) return message.newError(c.DBUS_ERROR_NO_MEMORY, "Out of Memory").?;
                     // key
                     dict_iter.appendBasic(.string, split_name[1]) catch return message.newError(c.DBUS_ERROR_NO_MEMORY, "Out of Memory").?;
                     // value
-                    if (dict_iter.openContainer(.variant, getSignature(@typeInfo(@TypeOf(function)).Fn.return_type.?), &variant_iter) != .true) return message.newError(c.DBUS_ERROR_NO_MEMORY, "Out of Memory").?;
+                    if (!dict_iter.openContainer(.variant, getSignature(@typeInfo(@TypeOf(function)).Fn.return_type.?), &variant_iter)) return message.newError(c.DBUS_ERROR_NO_MEMORY, "Out of Memory").?;
                     variant_iter.appendAnytype(function(interface_pointer)) catch return message.newError(c.DBUS_ERROR_NO_MEMORY, "Out of Memory").?;
-                    if (iter.closeContainer(&variant_iter) != .true) return message.newError(c.DBUS_ERROR_NO_MEMORY, "Out of Memory").?;
-                    if (iter.closeContainer(&dict_iter) != .true) return message.newError(c.DBUS_ERROR_NO_MEMORY, "Out of Memory").?;
+                    if (!iter.closeContainer(&variant_iter)) return message.newError(c.DBUS_ERROR_NO_MEMORY, "Out of Memory").?;
+                    if (!iter.closeContainer(&dict_iter)) return message.newError(c.DBUS_ERROR_NO_MEMORY, "Out of Memory").?;
                 }
             }
 
-            if (iter.closeContainer(&array_iter) != .true) return message.newError(c.DBUS_ERROR_NO_MEMORY, "Out of Memory").?;
+            if (!iter.closeContainer(&array_iter)) return message.newError(c.DBUS_ERROR_NO_MEMORY, "Out of Memory").?;
             return reply;
         }
     }
@@ -1154,7 +1192,9 @@ pub const PendingCall = opaque {
     pub const NotifyFunction = *const fn (pending: *PendingCall, user_data: *anyopaque) callconv(.C) void;
     ///Sets a notification function to be called when the reply is received or the pending call times out.
     pub extern fn dbus_pending_call_set_notify(pending: *PendingCall, function: NotifyFunction, user_data: *void, free_user_data: ?FreeFunction) dbus_bool_t;
-    pub const setNotify = dbus_pending_call_set_notify;
+    pub inline fn setNotify(pending: *PendingCall, function: NotifyFunction, user_data: *void, free_user_data: ?FreeFunction) bool {
+        return dbus_pending_call_set_notify(pending, function, user_data, free_user_data) == .true;
+    }
 
     /// Cancels the pending call, such that any reply or error received will just be ignored.
     pub extern fn dbus_pending_call_cancel(pending: *PendingCall) void;
@@ -1162,7 +1202,9 @@ pub const PendingCall = opaque {
 
     /// Checks whether the pending call has received a reply yet, or not.
     pub extern fn dbus_pending_call_get_completed(pending: *PendingCall) dbus_bool_t;
-    pub const getCompleted = dbus_pending_call_get_completed;
+    pub inline fn getCompleted(pending: *PendingCall) bool {
+        return dbus_pending_call_get_completed(pending) == .true;
+    }
 
     /// Gets the reply, or returns NULL if none has been received yet.
     pub extern fn dbus_pending_call_steal_reply(pending: *PendingCall) ?*Message;

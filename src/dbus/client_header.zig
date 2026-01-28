@@ -91,7 +91,7 @@ fn methodCallGeneric(
     var pending_return: *dbus.PendingCall = undefined;
     const function = struct {
         pub fn _function(pending: *dbus.PendingCall, user_data: *anyopaque) callconv(.C) void {
-            if (pending.getCompleted() == .true) {
+            if (pending.getCompleted()) {
                 const reply = pending.stealReply().?;
                 defer reply.unref();
                 dbus.handleMessageNoreturn(reply, callback, @alignCast(@ptrCast(user_data)));
@@ -105,8 +105,8 @@ fn methodCallGeneric(
         }
     }._function else null;
 
-    if (connection.sendWithReply(message, &pending_return, -1) == .false) return error.OutOfMemory;
-    if (pending_return.setNotify(function, @alignCast(@ptrCast(data)), free_function) == .false) return error.OutOfMemory;
+    if (!connection.sendWithReply(message, &pending_return, -1)) return error.OutOfMemory;
+    if (!pending_return.setNotify(function, @alignCast(@ptrCast(data)), free_function)) return error.OutOfMemory;
 }
 fn getPropertyGeneric(
     interface: anytype,
@@ -126,12 +126,12 @@ fn getPropertyGeneric(
         "Get",
     ) orelse return error.OutOfMemory;
     errdefer message.unref();
-    if (message.appendArgs(.{ interface.interface, property_name }) == .false) return error.OutOfMemory;
+    if (!message.appendArgs(.{ interface.interface, property_name })) return error.OutOfMemory;
 
     var pending_return: *dbus.PendingCall = undefined;
     const function = struct {
         pub fn _function(pending: *dbus.PendingCall, user_data: *anyopaque) callconv(.C) void {
-            if (pending.getCompleted == .true) {
+            if (pending.getCompleted) {
                 const reply = pending.stealReply().?;
                 defer reply.unref();
 
@@ -159,8 +159,8 @@ fn getPropertyGeneric(
         }
     }._function else null;
 
-    if (pending_return.setNotify(function, data, free_function) == .false) return error.OutOfMemory;
-    if (connection.sendWithReply(message, &pending_return, -1) == .false) return error.OutOfMemory;
+    if (!pending_return.setNotify(function, data, free_function)) return error.OutOfMemory;
+    if (!connection.sendWithReply(message, &pending_return, -1)) return error.OutOfMemory;
 }
 
 connection: *dbus.Connection = undefined,
