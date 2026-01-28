@@ -13,11 +13,10 @@ pub const Widget = @import("./Widget.zig");
 pub const Scheduler = @import("./Scheduler.zig");
 pub const FileNotifier = @import("./FileNotifier.zig");
 pub const Watch = @import("./Watch.zig");
-pub const dbus = @import("dbus/dbus.zig");
+pub const dbus = @import("dbus");
 pub const c = @cImport({
     @cInclude("cairo/cairo.h");
     @cInclude("pango/pangocairo.h");
-    @cInclude("dbus/dbus.h");
     @cInclude("time.h");
     @cInclude("linux/input-event-codes.h");
 });

@@ -61,7 +61,7 @@ pub fn configure(self: *Context, allocator: Allocator) !void {
         log.err("{s} {s}", .{ err.name.?, err.message.? });
         return error.Dbus;
     };
-    _ = dbus_connection.addFilter(dbus.printFilter, undefined, null);
+    // _ = dbus_connection.addFilter(dbus.printFilter, undefined, null);
 
     const file_notifier = try allocator.create(FileNotifier);
     file_notifier.* = try FileNotifier.init(allocator);

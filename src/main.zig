@@ -1,4 +1,7 @@
 const std = @import("std");
+const Notifications = @import("Notifications");
+const DBusMenu = @import("DBusMenu");
+const StatusNotifierWatcher = @import("StatusNotifierWatcher");
 const log = std.log;
 const math = std.math;
 const assert = std.debug.assert;
@@ -44,6 +47,37 @@ pub fn main() !void {
     defer context.destroy();
     const dbus_connection = dbus.busGet(.session, null).?;
     var err: dbus.Error = .{};
+
+    var notifications = Notifications{};
+    notifications.register(dbus_connection, "org.freedesktop.Notifications", "/org/freedesktop/Notifications");
+    defer notifications.unRegister();
+    // notifications
+    // notifications.Notifications.registerSignalHandler();
+    var notification_id: u32 = 0;
+    try notifications.notifications.Notify(
+        .{
+            .summary = "started serve",
+            .app_name = "app",
+            .replaces_id = 0,
+            .app_icon = "",
+            .body = "",
+            .actions = &.{},
+            .hints = &.{},
+            .expire_timeout = -1,
+        },
+        &notification_id,
+        handleNotifyReturn,
+        null,
+    );
+
+    var status_notifier_watcher = StatusNotifierWatcher{};
+    status_notifier_watcher.register(dbus_connection, "org.kde.StatusNotifierWatcher", "/StatusNotifierWatcher");
+    status_notifier_watcher.statusNotifierWatcher.setSignalHandler(@as(*anyopaque, undefined), handleStatusNotifierWatcherSignal);
+    defer status_notifier_watcher.unRegister();
+
+    // var menu = DBusMenu{};
+    // menu.register(dbus_connection, "bus_name", "object_path");
+    // defer menu.unRegister();
     const ret = dbus_connection.requestName("org.testing.tester", 0, &err);
     _ = ret;
     var notification_handler = NotificationHandler.init(allocator);
@@ -225,6 +259,14 @@ fn drawNotifications(bw: *BasicWidgets, notification_handler: *NotificationHandl
 
 pub fn markDirty(surface: *Surface) void {
     surface.updated = true;
+}
+fn handleNotifyReturn(args: Notifications.NotificationsInterface.NotifyReturnArgs, ptr: *u32) void {
+    ptr.* = args.id;
+}
+fn handleStatusNotifierWatcherSignal(_: *StatusNotifierWatcher.StatusNotifierWatcherInterface, signal: StatusNotifierWatcher.StatusNotifierWatcherInterface.Signal, _: *anyopaque) void {
+    switch (signal) {
+        inline else => |payload, tag| log.debug("{s}({})", .{ @tagName(tag), dbus.argStructPrinter(payload) }),
+    }
 }
 
 test {

@@ -1,10 +1,8 @@
 const std = @import("std");
 const log = std.log;
 const Allocator = std.mem.Allocator;
-const common = @import("../common.zig");
 pub const introspection = @import("introspection.zig");
 const assert = std.debug.assert;
-// const c = common.c;
 pub const c = @cImport({
     @cInclude("dbus/dbus.h");
 });
@@ -29,7 +27,7 @@ pub const Connection = opaque {
     pub extern fn dbus_connection_send(connection: *Connection, message: *Message, client_serial: ?*u32) dbus_bool_t;
     pub const send = dbus_connection_send;
 
-    pub extern fn dbus_connection_send_with_reply(connection: *Connection, message: *Message, pending_return: [*c]?*PendingCall, timeout_milliseconds: c_int) dbus_bool_t;
+    pub extern fn dbus_connection_send_with_reply(connection: *Connection, message: *Message, pending_return: ?**PendingCall, timeout_milliseconds: c_int) dbus_bool_t;
     pub const sendWithReply = dbus_connection_send_with_reply;
 
     pub extern fn dbus_connection_send_with_reply_and_block(connection: *Connection, message: *Message, timeout_milliseconds: c_int, err: *Error) ?*Message;
@@ -251,6 +249,12 @@ pub const Message = opaque {
     pub extern fn dbus_message_set_serial(message: *Message, serial: u32) void;
     pub const setSerial = dbus_message_set_serial;
 
+    pub extern fn dbus_message_set_no_reply(message: *Message, no_reply: dbus_bool_t) void;
+    pub const setNoReply = dbus_message_set_no_reply;
+
+    pub extern fn dbus_message_get_no_reply(message: *Message) dbus_bool_t;
+    pub const getNoReply = dbus_message_get_no_reply;
+
     pub extern fn dbus_message_get_args(message: *Message, @"error": ?*Error, first_arg_type: ArgType, ...) dbus_bool_t;
     pub const getArgs = dbus_message_get_args;
 
@@ -279,6 +283,21 @@ pub const Message = opaque {
         inline for (std.meta.fields(T)) |field| {
             try iter.appendAnytype(@field(args, field.name));
         }
+    }
+
+    /// get all fields of struct
+    /// allocates memory for slices and variants
+    pub fn getArgsAnytype(message: *Message, ArgsTuple: type, allocator: Allocator) TypeMismatchOrAllocatorError!ArgsTuple {
+        assert(@typeInfo(ArgsTuple) == .Struct);
+        var args: ArgsTuple = undefined;
+        // grab arguemnts
+        var iter: MessageIter = undefined;
+        _ = message.iterInit(&iter);
+        inline for (@typeInfo(ArgsTuple).Struct.fields) |field| {
+            try iter.getAnytype(allocator, &@field(args, field.name));
+            _ = iter.next();
+        }
+        return args;
     }
 };
 
@@ -328,7 +347,7 @@ pub const MessageIter = extern struct {
     pub extern fn dbus_message_iter_append_fixed_array(iter: *MessageIter, element_type: ArgType, value: *const anyopaque, n_elements: c_int) dbus_bool_t;
     pub const appendFixedArray = dbus_message_iter_append_fixed_array;
 
-    pub extern fn dbus_message_iter_open_container(iter: *MessageIter, @"type": ArgType, contained_signature: [*c]const u8, sub: *MessageIter) dbus_bool_t;
+    pub extern fn dbus_message_iter_open_container(iter: *MessageIter, @"type": ArgType, contained_signature: ?[*:0]const u8, sub: *MessageIter) dbus_bool_t;
     pub const openContainer = dbus_message_iter_open_container;
 
     pub extern fn dbus_message_iter_close_container(iter: *MessageIter, sub: *MessageIter) dbus_bool_t;
@@ -355,6 +374,7 @@ pub const MessageIter = extern struct {
         };
         const T = if (is_pointer) @TypeOf(arg.*) else @TypeOf(arg);
 
+        // for appendBasic
         const ptr: *const anyopaque = @ptrCast(if (is_pointer) arg else &arg);
         switch (@typeInfo(T)) {
             .Bool, .Int => {
@@ -362,18 +382,18 @@ pub const MessageIter = extern struct {
             },
             .Float => |float| {
                 if (float.bits != 64) @compileError("Expected f64");
-                if (iter.appendBasic(.double, ptr) != 1) return error.OutOfMemory;
+                if (iter.appendBasic(.double, ptr) != .true) return error.OutOfMemory;
             },
             .Array => |array| {
                 if (array.child == u8 and array.sentinel != null and @as(*u8, array.sentinel.?).* == 0) {
-                    if (iter.appendBasic(.string, ptr) != 1) return error.OutOfMemory;
+                    if (iter.appendBasic(.string, ptr) != .true) return error.OutOfMemory;
                 } else {
                     var sub_iter: MessageIter = undefined;
                     const signature = getSignature(array.child) ++ [_]u8{0};
-                    if (iter.openContainer(.array, signature.ptr, &sub_iter) != 1) return error.OutOfMemory;
+                    if (iter.openContainer(.array, signature.ptr, &sub_iter) != .true) return error.OutOfMemory;
                     for (if (is_pointer) arg.* else arg) |elem|
                         try sub_iter.appendAnytype(elem);
-                    if (iter.closeContainer(&sub_iter) != 1) return error.OutOfMemory;
+                    if (iter.closeContainer(&sub_iter) != .true) return error.OutOfMemory;
                 }
             },
             .Pointer => |pointer| {
@@ -403,18 +423,18 @@ pub const MessageIter = extern struct {
                 // TODO: Dict Entries, struct
                 if (isDictEntry(T)) {
                     var sub_iter: MessageIter = undefined;
-                    if (iter.openContainer(.dict_entry, null, &sub_iter) != 1) return error.OutOfMemory;
+                    if (iter.openContainer(.dict_entry, null, &sub_iter) != .true) return error.OutOfMemory;
                     if (iter.closeContainer(&sub_iter) != .true) return error.OutOfMemory;
                 } else {
                     // struct
                     var sub_iter: MessageIter = undefined;
-                    if (iter.openContainer(.@"struct", null, &sub_iter) != 1) return error.OutOfMemory;
-                    for (data.fields) |field| {
-                        try sub_iter.appendAnytype(@field(ptr, field.name));
+                    if (iter.openContainer(.@"struct", null, &sub_iter) != .true) return error.OutOfMemory;
+                    const typed_ptr: *const T = @alignCast(@ptrCast(ptr));
+                    inline for (data.fields) |field| {
+                        try sub_iter.appendAnytype(@field(typed_ptr, field.name));
                     }
                     if (iter.closeContainer(&sub_iter) != .true) return error.OutOfMemory;
                 }
-                @compileError("Not Implemented");
             },
             .Enum => |enum_info| {
                 // enum masquerading as a int
@@ -426,17 +446,18 @@ pub const MessageIter = extern struct {
                 if (T == Arg) {
                     // variant
                     // TODO: get signature
+                    const typed_ptr: *const T = @alignCast(@ptrCast(ptr));
                     var sig_buf: [4096]u8 = undefined;
-                    sig_buf[0] = @intCast(@intFromEnum(ptr));
+                    sig_buf[0] = @intCast(@intFromEnum(typed_ptr.*));
                     sig_buf[1] = 0;
                     var sub_iter: MessageIter = undefined;
-                    if (iter.openContainer(.variant, &sig_buf, &sub_iter) != 1) return error.OutOfMemory;
+                    if (iter.openContainer(.variant, @ptrCast(&sig_buf), &sub_iter) != .true) return error.OutOfMemory;
                     switch (if (is_pointer) arg.* else arg) {
                         .array => {},
                         .@"struct" => {},
                         .variant => {},
                         inline else => |*field_ptr, tag| {
-                            if (iter.appendBasic(ArgType.fromType(tag).?, field_ptr) != .true) return error.OutOfMemory;
+                            if (iter.appendBasic(tag, @ptrCast(field_ptr)) != .true) return error.OutOfMemory;
                         },
                     }
                     if (iter.closeContainer(&sub_iter) != .true) return error.OutOfMemory;
@@ -459,8 +480,10 @@ pub const MessageIter = extern struct {
 
     /// write into a pointer the value from the iterator
     /// Example:
+    /// ```
     /// var a: i32;
-    /// iter.getAnytype(&a);
+    /// iter.getAnytype(allocator, &a);
+    /// ```
     pub fn getAnytype(iter: *MessageIter, allocator: Allocator, dst: anytype) TypeMismatchOrAllocatorError!void {
         assert(@typeInfo(@TypeOf(dst)) == .Pointer and @typeInfo(@TypeOf(dst)).Pointer.is_const == false and @typeInfo(@TypeOf(dst)).Pointer.size == .One);
         const ChildType = @typeInfo(@TypeOf(dst)).Pointer.child;
@@ -503,14 +526,17 @@ pub const MessageIter = extern struct {
                 if (pointer.sentinel) |sentinel| {
                     // Dbus String
                     if (pointer.child == u8 and @as(*const u8, @ptrCast(sentinel)).* == 0) {
+                        if (arg_type != .string) return error.TypeMismatch;
                         iter.getBasic(@ptrCast(dst));
+                        // if (pointer.size == .Slice) dst.len = std.mem.len(dst.ptr);
                     }
-                }
-                switch (pointer.size) {
+                } else switch (pointer.size) {
                     .One => {
                         @compileError("Error: Invalid type " ++ @typeName(pointer.child));
                     },
-                    .Many => {},
+                    .Many => {
+                        @compileError("Error: Invalid type " ++ @typeName(pointer.child));
+                    },
                     .Slice => {
                         if (arg_type != .array) return error.TypeMismatch;
                         const element_count = iter.getElementCount();
@@ -518,6 +544,8 @@ pub const MessageIter = extern struct {
                         try testMatchingTypes(pointer.child, element_type);
                         const buf = try allocator.alloc(pointer.child, @intCast(element_count));
 
+                        // basic type
+                        // fallback
                         var sub_iter: MessageIter = undefined;
                         iter.recurse(&sub_iter);
                         for (buf) |*elem|
@@ -537,10 +565,39 @@ pub const MessageIter = extern struct {
             .Union => {
                 if (ChildType == Arg) {
                     // variant
-                    dst.* = allocator.create(ArgType);
+                    // dst.* = try allocator.create(ArgType);
                     var sub_iter: MessageIter = undefined;
                     iter.recurse(&sub_iter);
-                    dst.*.* = sub_iter.getType();
+                    switch (sub_iter.getArgType()) {
+                        .object_path => {
+                            dst.* = .{ .object_path = .{ .path = undefined } };
+                            iter.getBasic(@ptrCast(&dst.object_path.path));
+                        },
+                        .signature => {
+                            dst.* = .{ .signature = .{ .signature = undefined } };
+                            iter.getBasic(@ptrCast(&dst.signature.signature));
+                        },
+                        .unix_fd => {
+                            dst.* = .{ .unix_fd = .{ .fd = undefined } };
+                            iter.getBasic(@ptrCast(&dst.unix_fd.fd));
+                        },
+                        .array => {
+                            unreachable;
+                        },
+                        .variant => {
+                            unreachable;
+                        },
+                        .@"struct" => {
+                            unreachable;
+                        },
+                        .dict_entry => {
+                            unreachable;
+                        },
+                        inline else => |tag| {
+                            dst.* = @unionInit(Arg, @tagName(tag), undefined);
+                            sub_iter.getBasic(@ptrCast(&@field(dst, @tagName(tag))));
+                        },
+                    }
                 } else {
                     @compileError("Cannot convert type " ++ @typeName(ChildType) ++ " to dbus type");
                 }
@@ -580,6 +637,25 @@ pub inline fn typeMismatchErrorString(expected_type: type) [:0]const u8 {
 pub const TypeMismatchError = error{TypeMismatch};
 pub const TypeMismatchOrAllocatorError = (Allocator.Error || TypeMismatchError);
 
+// convenience function for extracting parameter information
+pub fn fnParams(function: anytype) []const std.builtin.Type.Fn.Param {
+    const fn_type_info = @typeInfo(@TypeOf(function));
+    const fn_info = if (fn_type_info == .Pointer) @typeInfo(fn_type_info.Pointer.child).Fn else fn_type_info.Fn;
+    return fn_info.params;
+}
+
+/// callback must be a function taking in 2 arguments, a pointer to some data, and an args tuple/struct with no return
+/// Ex: fn(*Mydata, struct{i32, [*:0] const u8}) void {...}
+/// argument types must match with the message given
+pub fn handleMessageNoreturn(message: *Message, callback: anytype, user_data: fnParams(callback)[1].type.?) void {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer _ = arena.reset(.free_all); // potentially make more efficient?
+
+    // argument list
+    const args = message.getArgsAnytype(fnParams(callback)[0].type.?, arena.allocator()) catch unreachable;
+    // grab arguemnts
+    callback(args, user_data);
+}
 /// invoke the function after parsing message args and return resulting function return
 pub fn handleMethodCall(interface: anytype, message: *Message, function: anytype) Allocator.Error!*Message {
     assert(@typeInfo(@TypeOf(interface)) == .Pointer);
@@ -599,6 +675,7 @@ pub fn handleMethodCall(interface: anytype, message: *Message, function: anytype
         @typeInfo(params[1].type.?) == .Struct and !@hasDecl(params[1].type.?, "dbus_type"))
     blk: {
         var args: params[1].type.? = undefined;
+        // grab arguemnts
         inline for (@typeInfo(@TypeOf(args)).Struct.fields) |field| {
             iter.getAnytype(allocator, &@field(args, field.name)) catch |err| switch (err) {
                 error.TypeMismatch => return message.newError(c.DBUS_ERROR_INVALID_ARGS, typeMismatchErrorString(field.type)) orelse return error.OutOfMemory,
@@ -635,7 +712,7 @@ pub fn handleMethodCall(interface: anytype, message: *Message, function: anytype
     }
     return reply;
 }
-inline fn matchesInterface(T: type, interface_name: [*:0]const u8) bool {
+pub inline fn matchesInterface(T: type, interface_name: [*:0]const u8) bool {
     return isInterface(T) and std.mem.orderZ(u8, T.interface, interface_name) == .eq;
 }
 
@@ -671,12 +748,14 @@ pub fn getObjectHandleMessageFunction(DbusObjectType: type) HandleMessageFunctio
                     return .handled;
                 }
             } else if (std.mem.orderZ(u8, interface_name, "org.freedesktop.DBus.Properties") == .eq) {
+                // var err = Error{};
                 if (std.mem.orderZ(u8, method_name, "Get") == .eq) {
-                    // TODO
+                    _ = connection.send(methodGet(message, data), null);
+                    return .handled;
                 } else if (std.mem.orderZ(u8, method_name, "Set") == .eq) {
-                    // TODO
+                    if (methodSet(message, data)) |reply| _ = connection.send(reply, null);
                 } else if (std.mem.orderZ(u8, method_name, "GetAll") == .eq) {
-                    // TODO
+                    _ = connection.send(methodGetAll(message, data), null);
                 } else {
                     _ = connection.send(message.newError(c.DBUS_ERROR_UNKNOWN_METHOD, "Method name you invoked isn't known by the object you invoked it on.").?, null);
                 }
@@ -695,19 +774,13 @@ pub fn getObjectHandleMessageFunction(DbusObjectType: type) HandleMessageFunctio
             } else {
                 _ = connection.send(message.newError(c.DBUS_ERROR_UNKNOWN_INTERFACE, "Interface you invoked a method on isn't known by the object.").?, null);
             }
-            // inline for (@typeInfo(DbusObjectType).Struct.decls) |decl| {
-            //     const obj = @field(DbusObjectType, decl.name);
-            //     const ObjType = @TypeOf(obj);
-            //     if (matchesInterface(ObjType, interface_name)) {
-            //         const interface = @field(DbusObjectType, decl);
-            //         _ = interface;
-            //         return .handled;
-            //     }
-            // }
             return .handled;
         }
     }.handleMessage;
 }
+
+// common dbus methods
+
 pub fn methodGetMachineId(message: *Message) *Message {
     const machine_uuid: [*:0]const u8 = blk: {
         const static = struct {
@@ -735,6 +808,139 @@ pub fn methodIntrospect(message: *Message, ObjectType: type) *Message {
     // assert(introspection_string.ptr[introspection_string.len] == 0);
     _ = return_message.appendArgs(.string, &introspection_string.ptr, @intFromEnum(ArgType.invalid));
     return return_message;
+}
+pub fn methodGet(message: *Message, dbus_object: anytype) *Message {
+    var buf: [1024]u8 = undefined;
+    const args = message.getArgsAnytype(struct { interface_name: [*:0]const u8, property_name: [*:0]const u8 }, std.testing.failing_allocator) catch |err|
+        return switch (err) {
+        error.TypeMismatch => message.newError(c.DBUS_ERROR_INVALID_ARGS, typeMismatchErrorString([*:0]const u8)).?,
+        error.OutOfMemory => message.newError(c.DBUS_ERROR_NO_MEMORY, "Out of Memory").?,
+    };
+    const DbusObjectType = @typeInfo(@TypeOf(dbus_object)).Pointer.child;
+    inline for (@typeInfo(DbusObjectType).Struct.fields) |field| {
+        if (matchesInterface(field.type, args.interface_name)) {
+            const interface_pointer = if (@typeInfo(@TypeOf(@field(dbus_object, field.name))) == .Pointer) @field(dbus_object, field.name) else &@field(dbus_object, field.name);
+            const InterfaceType = @typeInfo(@TypeOf(interface_pointer)).Pointer.child;
+            inline for (@typeInfo(InterfaceType).Struct.decls) |decl| {
+                const split_name = comptime splitName(decl.name);
+                if (split_name[0] == .getProperty and std.mem.orderZ(u8, args.property_name, split_name[1]) == .eq) {
+                    const reply = message.newMethodReturn() orelse return message.newError(c.DBUS_ERROR_NO_MEMORY, "Out of Memory").?;
+                    const function = @field(InterfaceType, decl.name);
+                    var iter: MessageIter = undefined;
+                    reply.iterInitAppend(&iter);
+                    var sub_iter: MessageIter = undefined;
+                    if (iter.openContainer(.variant, getSignature(@typeInfo(@TypeOf(function)).Fn.return_type.?), &sub_iter) != .true) return message.newError(c.DBUS_ERROR_NO_MEMORY, "Out of Memory").?;
+                    sub_iter.appendAnytype(function(interface_pointer)) catch return message.newError(c.DBUS_ERROR_NO_MEMORY, "Out of Memory").?;
+                    if (iter.closeContainer(&sub_iter) != .true) return message.newError(c.DBUS_ERROR_NO_MEMORY, "Out of Memory").?;
+                    return reply;
+                }
+            }
+            return message.newError(
+                c.DBUS_ERROR_UNKNOWN_PROPERTY,
+                std.fmt.bufPrintZ(&buf, "interface {[interface_name]s} does not have property {[property_name]s}", args) catch unreachable,
+            ).?;
+        }
+    }
+    // error here means we need a bigger buffer
+    return message.newError(
+        c.DBUS_ERROR_UNKNOWN_INTERFACE,
+        std.fmt.bufPrintZ(
+            &buf,
+            "interface {s} is not implemented on object {s}",
+            .{ args.interface_name, if (@hasField(DbusObjectType, "path")) dbus_object.path else DbusObjectType.path },
+        ) catch unreachable,
+    ).?;
+}
+pub fn methodGetAll(message: *Message, dbus_object: anytype) *Message {
+    const args = message.getArgsAnytype(struct { interface_name: [*:0]const u8 }, std.testing.failing_allocator) catch |err|
+        return switch (err) {
+        error.TypeMismatch => message.newError(c.DBUS_ERROR_INVALID_ARGS, typeMismatchErrorString([*:0]const u8)).?,
+        error.OutOfMemory => message.newError(c.DBUS_ERROR_NO_MEMORY, "Out of Memory").?,
+    };
+    const DbusObjectType = @typeInfo(@TypeOf(dbus_object)).Pointer.child;
+    inline for (@typeInfo(DbusObjectType).Struct.fields) |field| {
+        if (matchesInterface(field.type, args.interface_name)) {
+            const reply = message.newMethodReturn() orelse return message.newError(c.DBUS_ERROR_NO_MEMORY, "Out of Memory").?;
+            var iter: MessageIter = undefined;
+            var array_iter: MessageIter = undefined;
+            reply.iterInitAppend(&iter);
+            if (iter.openContainer(.array, "{sv}", &array_iter) != .true) return message.newError(c.DBUS_ERROR_NO_MEMORY, "Out of Memory").?;
+
+            const interface_pointer = if (@typeInfo(@TypeOf(@field(dbus_object, field.name))) == .Pointer) @field(dbus_object, field.name) else &@field(dbus_object, field.name);
+            const InterfaceType = @typeInfo(@TypeOf(interface_pointer)).Pointer.child;
+            inline for (@typeInfo(InterfaceType).Struct.decls) |decl| {
+                const split_name = comptime splitName(decl.name);
+                if (split_name[0] == .getProperty) {
+                    const function = @field(InterfaceType, decl.name);
+                    var dict_iter: MessageIter = undefined;
+                    var variant_iter: MessageIter = undefined;
+                    reply.iterInitAppend(&iter);
+                    if (array_iter.openContainer(.dict_entry, null, &dict_iter) != .true) return message.newError(c.DBUS_ERROR_NO_MEMORY, "Out of Memory").?;
+                    // key
+                    dict_iter.appendBasic(.string, split_name[1]) catch return message.newError(c.DBUS_ERROR_NO_MEMORY, "Out of Memory").?;
+                    // value
+                    if (dict_iter.openContainer(.variant, getSignature(@typeInfo(@TypeOf(function)).Fn.return_type.?), &variant_iter) != .true) return message.newError(c.DBUS_ERROR_NO_MEMORY, "Out of Memory").?;
+                    variant_iter.appendAnytype(function(interface_pointer)) catch return message.newError(c.DBUS_ERROR_NO_MEMORY, "Out of Memory").?;
+                    if (iter.closeContainer(&variant_iter) != .true) return message.newError(c.DBUS_ERROR_NO_MEMORY, "Out of Memory").?;
+                    if (iter.closeContainer(&dict_iter) != .true) return message.newError(c.DBUS_ERROR_NO_MEMORY, "Out of Memory").?;
+                }
+            }
+
+            if (iter.closeContainer(&array_iter) != .true) return message.newError(c.DBUS_ERROR_NO_MEMORY, "Out of Memory").?;
+            return reply;
+        }
+    }
+    var buf: [1024]u8 = undefined;
+    // error here means we need a bigger buffer
+    return message.newError(
+        c.DBUS_ERROR_UNKNOWN_INTERFACE,
+        std.fmt.bufPrintZ(
+            &buf,
+            "interface {s} is not implemented on object {s}",
+            .{ args.interface_name, if (@hasField(DbusObjectType, "path")) dbus_object.path else DbusObjectType.path },
+        ) catch unreachable,
+    ).?;
+}
+pub fn methodSet(message: *Message, dbus_object: anytype) ?*Message {
+    var buf: [1024]u8 = undefined;
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer _ = arena.reset(.free_all); // potentially make more efficient?
+    const args = message.getArgsAnytype(struct { interface_name: [*:0]const u8, property_name: [*:0]const u8, value: Arg }, arena.allocator()) catch |err|
+        return switch (err) {
+        error.TypeMismatch => message.newError(c.DBUS_ERROR_INVALID_ARGS, typeMismatchErrorString([*:0]const u8)).?,
+        error.OutOfMemory => message.newError(c.DBUS_ERROR_NO_MEMORY, "Out of Memory").?,
+    };
+    const DbusObjectType = @typeInfo(@TypeOf(dbus_object)).Pointer.child;
+    inline for (@typeInfo(DbusObjectType).Struct.fields) |field| {
+        if (matchesInterface(field.type, args.interface_name)) {
+            const interface_pointer = if (@typeInfo(@TypeOf(@field(dbus_object, field.name))) == .Pointer) @field(dbus_object, field.name) else &@field(dbus_object, field.name);
+            const InterfaceType = @typeInfo(@TypeOf(interface_pointer)).Pointer.child;
+            inline for (@typeInfo(InterfaceType).Struct.decls) |decl| {
+                const split_name = comptime splitName(decl.name);
+                if (split_name[0] == .setProperty and std.mem.orderZ(u8, args.property_name, split_name[1]) == .eq) {
+                    const function = @field(InterfaceType, decl.name);
+                    function(interface_pointer, @field(args.value, @tagName(Arg.fromType(fnParams(function)[1]))));
+                    return if (message.getNoReply() == .true)
+                        null
+                    else
+                        message.newMethodReturn() orelse return message.newError(c.DBUS_ERROR_NO_MEMORY, "Out of Memory").?;
+                }
+            }
+            return message.newError(
+                c.DBUS_ERROR_UNKNOWN_PROPERTY,
+                std.fmt.bufPrintZ(&buf, "interface {s} does not have property {s}", .{ args.interface_name, args.property_name }) catch unreachable,
+            ).?;
+        }
+    }
+    // error here means we need a bigger buffer
+    return message.newError(
+        c.DBUS_ERROR_UNKNOWN_INTERFACE,
+        std.fmt.bufPrintZ(
+            &buf,
+            "interface {s} is not implemented on object {s}",
+            .{ args.interface_name, if (@hasField(DbusObjectType, "path")) dbus_object.path else DbusObjectType.path },
+        ) catch unreachable,
+    ).?;
 }
 
 pub export fn printFilter(connection: *Connection, message: *Message, user_data: *anyopaque) HandlerResult {
@@ -1018,6 +1224,49 @@ pub inline fn isInterface(T: type) bool {
     return @typeInfo(T) == .Struct and @hasDecl(T, "interface");
 }
 
+/// for debugging dbus arguments
+pub fn ArgStructPrinter(ArgStruct: type) type {
+    return struct {
+        arg_struct: ArgStruct,
+        include_field_names: bool = false,
+        const Self = @This();
+        pub fn format(self: Self, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+            const fields = @typeInfo(ArgStruct).Struct.fields;
+            inline for (fields, 0..) |field, i| {
+                if (self.include_field_names) try writer.print("{s} = ", .{field.name});
+                try printField(@field(self.arg_struct, field.name), writer);
+                if (i != fields.len - 1) try writer.writeAll(", ");
+            }
+        }
+        pub fn printField(field: anytype, writer: anytype) !void {
+            switch (@typeInfo(@TypeOf(field))) {
+                .Pointer => |info| {
+                    if (info.sentinel) |sentinel| {
+                        if (info.child == u8 and @as(*const u8, @ptrCast(sentinel)).* == 0) {
+                            try writer.print("\"{s}\"", .{field});
+                            return;
+                        }
+                    }
+                    if (info.size == .Slice) {
+                        for (field, 0..) |elem, i| {
+                            try writer.writeByte('[');
+                            try printField(elem, writer);
+                            if (i != field.len - 1) try writer.writeAll(", ");
+                            try writer.writeByte(']');
+                        }
+                        return;
+                    }
+                },
+                else => {},
+            }
+            try writer.print("{}", .{field});
+        }
+    };
+}
+/// for debugging dbus arguments
+pub fn argStructPrinter(arg_struct: anytype) ArgStructPrinter(@TypeOf(arg_struct)) {
+    return ArgStructPrinter(@TypeOf(arg_struct)){ .arg_struct = arg_struct };
+}
 // test "introspection" {
 //     std.debug.print("{s}", .{genIntrospection(struct {})});
 // }

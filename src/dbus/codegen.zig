@@ -1,0 +1,274 @@
+//! creates zig code from dbus introspection
+const std = @import("std");
+const log = std.log;
+const mem = std.mem;
+const assert = std.debug.assert;
+const dbus = @import("dbus.zig");
+const introspection = @import("introspection.zig");
+
+// pub var std_options = .{
+//     .log_level = .err,
+// };
+pub const client_header = @embedFile("./client_header.zig");
+pub fn main() !void {
+    var arena_allocator = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    const allocator = arena_allocator.allocator();
+    defer _ = arena_allocator.reset(.free_all);
+    const options = Options.parseArgs();
+    const cwd = std.fs.cwd();
+
+    const output_file = if (options.output_filename) |filename|
+        cwd.createFile(filename, .{}) catch {
+            log.err("unable to open: {s}", .{filename});
+            return error.FileNotFound;
+        }
+    else
+        std.io.getStdOut();
+    defer output_file.close();
+    var bw = std.io.bufferedWriter(output_file.writer());
+    defer bw.flush() catch {};
+    const output = bw.writer();
+
+    const input_file = if (options.input_filename) |filename|
+        cwd.openFile(filename, .{}) catch {
+            log.err("unable to open: {s}", .{filename});
+            return error.FileNotFound;
+        }
+    else
+        std.io.getStdIn();
+    _ = arena_allocator.reset(.retain_capacity);
+    defer input_file.close();
+
+    const buf = try input_file.readToEndAlloc(allocator, 0x1000000);
+    const node = try introspection.parse(buf, true, allocator);
+    // log.debug("{}", .{node});
+
+    try output.writeAll(client_header);
+    // interface fields
+    for (node.interfaces) |interface| {
+        var field_name_buf: [300]u8 = undefined;
+        const interface_field_name = interfaceFieldName(interface.name, &field_name_buf);
+        var type_name_buf: [300]u8 = undefined;
+        const interface_type_name = interfaceTypeName(interface_field_name, &type_name_buf);
+        try output.print("{s}: {s} = .{{}},\n", .{ interface_field_name, interface_type_name });
+    }
+    // interface field types
+    for (node.interfaces) |interface| {
+        // var field_name_buf: [300]u8 = undefined;
+        var field_name_buf: [300]u8 = undefined;
+        const interface_field_name = interfaceFieldName(interface.name, &field_name_buf);
+        var type_name_buf: [300]u8 = undefined;
+        const interface_type_name = interfaceTypeName(interface_field_name, &type_name_buf);
+
+        try output.print("pub const {s} = struct {{\n", .{interface_type_name});
+        try output.print("    pub const interface = \"{s}\";\n", .{interface.name});
+
+        if (interface.signals.len > 0) {
+            // handlers
+            try output.print(
+                \\    signal_handler: ?*const fn (*{0s}, *dbus.Message, *anyopaque) dbus.HandlerResult = null,
+                \\    data: *anyopaque = undefined,
+                \\
+                \\    pub fn setSignalHandler(self: *{0s}, data: anytype, handler: fn (*{0s}, Signal, @TypeOf(data)) void) void {{
+                \\        self.signal_handler = generateSignalHander(handler);
+                \\        self.data = @ptrCast(data);
+                \\    }}
+                \\
+            , .{interface_type_name});
+            try output.writeAll("    pub const Signal = union(enum) {\n");
+            for (interface.signals) |signal| {
+                try output.print("        {s}: struct{{", .{signal.name});
+                // try writeZigTypeFromDbusSig(output, signal.args);
+                for (signal.args, 0..) |arg, i| {
+                    if (arg.direction == .in) {
+                        try printArg(output, arg, i);
+                        if (i != signal.args.len - 1) try output.writeAll(", ");
+                    }
+                }
+                try output.writeAll("},\n");
+            }
+            try output.writeAll("    };\n");
+        }
+
+        for (interface.methods) |method| {
+            try output.print(
+                \\    pub fn {s}(self: *{s}, args: {0s}Args, data: anytype, callback: fn ({0s}ReturnArgs, @TypeOf(data)) void, free_callback: ?fn (@TypeOf(data)) void) !void {{
+                \\        try methodCallGeneric(self, "{s}", "{0s}", args, {0s}ReturnArgs, data, callback, free_callback);
+                \\    }}
+                \\
+            , .{ method.name, interface_type_name, interface_field_name });
+            try output.print("    pub const {s}Args = struct {{\n", .{method.name});
+            for (method.args, 0..) |arg, i| {
+                if (arg.direction == .in) {
+                    try output.writeAll("        ");
+                    try printArg(output, arg, i);
+                    try output.writeAll(",\n");
+                }
+            }
+            try output.writeAll("    };\n");
+
+            try output.print("    pub const {s}ReturnArgs = struct {{\n", .{method.name});
+            for (method.args, 0..) |arg, i| {
+                if (arg.direction == .out) {
+                    try output.writeAll("        ");
+                    try printArg(output, arg, i);
+                    try output.writeAll(",\n");
+                }
+            }
+            try output.writeAll("    };\n");
+        }
+
+        for (interface.properties) |property| {
+            const property_type = ZigTypePrinter{ .s = property.type };
+            if (property.access == .read or property.access == .readwrite) {
+                try output.print(
+                    \\    pub fn get{s}(self: *{s}, data: anytype, callback: fn ({}, @TypeOf(data)) void, free_callback: ?fn (@TypeOf(data)) void) !void {{
+                    \\        try getPropertyGeneric(self, "{s}", "{0s}", {2}, data, callback, free_callback);
+                    \\    }}
+                    \\
+                , .{ property.name, interface_type_name, property_type, interface_field_name });
+            }
+            if (property.access == .write or property.access == .readwrite) {
+                try output.print(
+                    \\    pub fn set{s}(self: *{s}, value: {}) !void {{
+                    \\        try setPropertyGeneric(self, "{s}", "{0s}", {2}, value);
+                    \\    }}
+                    \\
+                , .{ property.name, interface_type_name, property_type, interface_field_name });
+                try writeZigTypeFromDbusSig(output, property.type);
+            }
+        }
+
+        try output.writeAll("};\n");
+    }
+}
+
+/// command line option parsing
+pub const Options = struct {
+    input_filename: ?[:0]const u8 = null,
+    output_filename: ?[:0]const u8 = null,
+    pub fn parseArgs() Options {
+        var ret = Options{};
+        var args = std.process.args();
+        const executable = args.next().?;
+
+        while (args.next()) |arg| {
+            const input_long = "--input=";
+            const output_long = "--output=";
+            if (mem.eql(u8, arg, "-i")) {
+                ret.input_filename = args.next().?;
+            } else if (arg.len >= input_long.len and mem.eql(u8, arg[0..input_long.len], input_long)) {
+                ret.input_filename = arg[input_long.len..];
+            } else if (mem.eql(u8, arg, "-o")) {
+                ret.output_filename = args.next().?;
+            } else if (arg.len >= input_long.len and mem.eql(u8, arg[0..output_long.len], output_long)) {
+                ret.output_filename = arg[output_long.len..];
+            } else if (mem.eql(u8, arg, "-h") or mem.eql(u8, arg, "--help")) {
+                exitHelp(executable, 0);
+            } else {
+                ret.input_filename = arg;
+            }
+        }
+        return ret;
+    }
+};
+fn exitHelp(executable: [:0]const u8, exit_status: u8) void {
+    std.io.getStdOut().writer().print(
+        \\usage:
+        \\ {0s} OPTIONS...
+        \\generate zig client code from an xml file for a dbus object
+        \\options:
+        \\ -h, --help                 print help
+        \\ -i, --input=<filename>     specify input file, default to stdin
+        \\ -o, --output=<filename>    specify output file, default to stdout
+        \\example:
+        \\ {0s} -i notify.xml -o notify.zig
+        \\
+    , .{executable}) catch unreachable;
+    std.process.exit(exit_status);
+}
+
+/// print zig type for a signature
+pub fn writeZigTypeFromDbusSig(writer: anytype, sig: []const u8) !void {
+    const remaining = try writeZigTypeFromDbusSigWithRemaining(writer, sig);
+    if (remaining.len != 0) return error.InvalidSignature;
+}
+fn writeZigTypeFromDbusSigWithRemaining(writer: anytype, sig: []const u8) ![]const u8 {
+    if (sig.len == 0) return error.InvalidSignature;
+    switch (sig[0]) {
+        'y' => try writer.writeAll("u8"),
+        'b' => try writer.writeAll("bool"),
+        'n' => try writer.writeAll("i16"),
+        'q' => try writer.writeAll("u16"),
+        'i' => try writer.writeAll("i32"),
+        'u' => try writer.writeAll("u32"),
+        'x' => try writer.writeAll("i64"),
+        't' => try writer.writeAll("u64"),
+        'd' => try writer.writeAll("f64"),
+        's' => try writer.writeAll("[*:0]const u8"),
+        'o' => try writer.writeAll("dbus.Arg.ObjectPath"),
+        'g' => try writer.writeAll("dbus.Arg.Signature"),
+        'h' => try writer.writeAll("dbus.Arg.Unixfd"),
+        'a' => {
+            try writer.writeAll("[]const ");
+            return writeZigTypeFromDbusSigWithRemaining(writer, sig[1..]);
+        },
+        'v' => {
+            try writer.writeAll("dbus.Arg");
+        },
+        '{' => {
+            try writer.writeAll("dbus.DictEntry(");
+            const second_arg_sig = try writeZigTypeFromDbusSigWithRemaining(writer, sig[1..]);
+            try writer.writeAll(", ");
+            const after_second_arg_sig = try writeZigTypeFromDbusSigWithRemaining(writer, second_arg_sig);
+            try writer.writeAll(")");
+            if (after_second_arg_sig.len == 0) return error.InvalidSignature;
+            if (after_second_arg_sig[0] != '}') return error.InvalidSignature;
+            return after_second_arg_sig[1..];
+        },
+        '(' => {
+            try writer.writeAll("struct {");
+            var remaining = sig[1..];
+            while (remaining[0] != ')') : (try writer.writeAll(", ")) {
+                remaining = try writeZigTypeFromDbusSigWithRemaining(writer, remaining);
+            }
+            try writer.writeAll("}");
+            // skip end of struct
+            return remaining[1..];
+        },
+        // dict_entry = 'e',
+        else => {
+            log.err("unexpected character {c}", .{sig[0]});
+            return error.InvalidSignature;
+        },
+    }
+    return sig[1..];
+}
+pub const ZigTypePrinter = struct {
+    s: []const u8,
+    pub fn format(self: ZigTypePrinter, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+        try writeZigTypeFromDbusSig(writer, self.s);
+    }
+};
+
+pub fn printArg(writer: anytype, arg: introspection.Arg, arg_num: anytype) !void {
+    const type_printer = ZigTypePrinter{ .s = arg.type };
+    if (arg.name) |arg_name| {
+        try writer.print("{s}: {}", .{ arg_name, type_printer });
+    } else try writer.print("arg{}: {}", .{ arg_num, type_printer });
+}
+
+pub fn interfaceFieldName(interface_name: []const u8, buf: []u8) [:0]const u8 {
+    const interface_last_field = interface_name[(mem.lastIndexOfScalar(u8, interface_name, '.') orelse std.math.maxInt(usize)) +% 1 ..];
+    std.mem.copyForwards(u8, buf, interface_last_field);
+    buf[0] = std.ascii.toLower(buf[0]);
+    return @ptrCast(buf[0..interface_last_field.len]);
+}
+pub fn interfaceTypeName(interface_field_name: []const u8, buf: []u8) [:0]const u8 {
+    const trailer = "Interface";
+    std.mem.copyForwards(u8, buf, interface_field_name);
+    buf[0] = std.ascii.toUpper(buf[0]);
+    std.mem.copyForwards(u8, buf[interface_field_name.len..], trailer);
+    buf[interface_field_name.len + trailer.len] = 0;
+    return @ptrCast(buf[0 .. interface_field_name.len + trailer.len]);
+}
