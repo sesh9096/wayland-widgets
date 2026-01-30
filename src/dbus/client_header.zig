@@ -148,7 +148,7 @@ fn getPropertyGeneric(
                 var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
                 defer _ = arena.reset(.free_all); // potentially make more efficient?
                 sub_iter.getAnytype(arena.allocator(), &property);
-                callback(reply, @alignCast(@ptrCast(user_data)));
+                callback(property, @alignCast(@ptrCast(user_data)));
             }
         }
     }._function;

@@ -53,7 +53,8 @@ pub fn build(b: *std.Build) void {
     exe.linkSystemLibrary("cairo");
     exe.linkSystemLibrary("pangocairo");
 
-    // stupid way to generate dbus client proxies
+    // slightly less stupid way to generate dbus client proxies
+    var dbus_codegen_step = b.addRunArtifact(dbus_codegen);
     inline for ([_][2][]const u8{
         .{ "xml/dbus/DBusMenu.xml", "DBusMenu" },
         .{ "xml/dbus/status_notifier_watcher.xml", "StatusNotifierWatcher" },
@@ -67,7 +68,6 @@ pub fn build(b: *std.Build) void {
             break :blk xml_path[start..end] ++ ".zig";
         };
 
-        var dbus_codegen_step = b.addRunArtifact(dbus_codegen);
         dbus_codegen_step.addPrefixedFileArg("--input=", b.path(xml_path));
         const root_path = dbus_codegen_step.addPrefixedOutputFileArg("--output=", generated_path);
         const generated_module = b.createModule(.{ .root_source_file = root_path });

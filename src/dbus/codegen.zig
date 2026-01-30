@@ -14,35 +14,40 @@ pub fn main() !void {
     var arena_allocator = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     const allocator = arena_allocator.allocator();
     defer _ = arena_allocator.reset(.free_all);
-    const options = Options.parseArgs();
+    const options = try Options.parseArgs(allocator);
+    defer options.deinit();
     const cwd = std.fs.cwd();
 
-    const output_file = if (options.output_filename) |filename|
-        cwd.createFile(filename, .{}) catch {
-            log.err("unable to open: {s}", .{filename});
-            return error.FileNotFound;
-        }
-    else
-        std.io.getStdOut();
-    defer output_file.close();
-    var bw = std.io.bufferedWriter(output_file.writer());
-    defer bw.flush() catch {};
-    const output = bw.writer();
+    for (options.pairs) |pair| {
+        const output_file = if (pair.output_filename) |filename|
+            cwd.createFile(filename, .{}) catch {
+                log.err("unable to open: {s}", .{filename});
+                return error.FileNotFound;
+            }
+        else
+            std.io.getStdOut();
+        defer output_file.close();
+        var bw = std.io.bufferedWriter(output_file.writer());
+        defer bw.flush() catch unreachable;
+        const output = bw.writer();
 
-    const input_file = if (options.input_filename) |filename|
-        cwd.openFile(filename, .{}) catch {
-            log.err("unable to open: {s}", .{filename});
-            return error.FileNotFound;
-        }
-    else
-        std.io.getStdIn();
-    _ = arena_allocator.reset(.retain_capacity);
-    defer input_file.close();
+        const input_file = if (pair.input_filename) |filename|
+            cwd.openFile(filename, .{}) catch {
+                log.err("unable to open: {s}", .{filename});
+                return error.FileNotFound;
+            }
+        else
+            std.io.getStdIn();
+        defer input_file.close();
 
-    const buf = try input_file.readToEndAlloc(allocator, 0x1000000);
-    const node = try introspection.parse(buf, true, allocator);
+        const buf = try input_file.readToEndAlloc(allocator, 0x1000000);
+        defer allocator.free(buf);
+        const node = try introspection.parse(buf, true, allocator);
+        try writeProxy(node, output);
+    }
     // log.debug("{}", .{node});
-
+}
+pub fn writeProxy(node: introspection.Node, output: anytype) !void {
     try output.writeAll(client_header);
     // interface fields
     for (node.interfaces) |interface| {
@@ -145,10 +150,76 @@ pub fn main() !void {
 
 /// command line option parsing
 pub const Options = struct {
-    input_filename: ?[:0]const u8 = null,
-    output_filename: ?[:0]const u8 = null,
-    pub fn parseArgs() Options {
-        var ret = Options{};
+    allocator: std.mem.Allocator,
+    pairs: []Pair,
+    pub const Pair = struct {
+        input_filename: ?[:0]const u8 = null,
+        output_filename: ?[:0]const u8 = null,
+        pub fn addInput(self: *Pair, filename: [:0]const u8) ?Pair {
+            defer self.input_filename = filename;
+            if (self.input_filename != null) {
+                defer self.output_filename = null;
+                return self.*;
+            }
+            return null;
+        }
+        pub fn addOutput(self: *Pair, filename: [:0]const u8) ?Pair {
+            defer self.output_filename = filename;
+            if (self.output_filename != null) {
+                defer self.input_filename = null;
+                return self.*;
+            }
+            return null;
+        }
+        pub fn isNull(self: Pair) bool {
+            return self.input_filename == null and self.output_filename == null;
+        }
+    };
+    pub fn deinit(self: Options) void {
+        self.allocator.free(self.pairs);
+    }
+    pub fn checkValidity(self: Options) !void {
+        const Set = std.StringHashMap(void);
+        var inputs = Set.init(self.allocator);
+        defer inputs.deinit();
+        var outputs = Set.init(self.allocator);
+        defer outputs.deinit();
+        var stdin_used = false;
+        var stdout_used = false;
+        for (self.pairs) |pair| {
+            // log.info("{?s} => {?s}", .{ pair.input_filename, pair.output_filename });
+            if (pair.input_filename) |filename| {
+                if (inputs.contains(filename)) {
+                    log.err("input file {s} specified more than once", .{filename});
+                    return error.Invalid;
+                }
+                try inputs.put(filename, {});
+            } else {
+                if (stdin_used) {
+                    log.err("stdin specified more than once", .{});
+                    return error.Invalid;
+                }
+                stdin_used = true;
+            }
+            if (pair.output_filename) |filename| {
+                if (outputs.contains(filename)) {
+                    log.err("output file {s} specified more than once", .{filename});
+                    return error.Invalid;
+                }
+                try outputs.put(filename, {});
+            } else {
+                if (stdout_used) {
+                    log.err("stdout specified more than once", .{});
+                    return error.Invalid;
+                }
+                stdout_used = true;
+            }
+        }
+    }
+    pub fn parseArgs(allocator: mem.Allocator) !Options {
+        var list = std.ArrayList(Pair).init(allocator);
+        var pair = Pair{};
+
         var args = std.process.args();
         const executable = args.next().?;
 
@@ -156,20 +227,25 @@ pub const Options = struct {
             const input_long = "--input=";
             const output_long = "--output=";
             if (mem.eql(u8, arg, "-i")) {
-                ret.input_filename = args.next().?;
+                if (pair.addInput(args.next().?)) |_pair| try list.append(_pair);
             } else if (arg.len >= input_long.len and mem.eql(u8, arg[0..input_long.len], input_long)) {
-                ret.input_filename = arg[input_long.len..];
+                if (pair.addInput(arg[input_long.len..])) |_pair| try list.append(_pair);
             } else if (mem.eql(u8, arg, "-o")) {
-                ret.output_filename = args.next().?;
+                if (pair.addOutput(args.next().?)) |_pair| try list.append(_pair);
             } else if (arg.len >= input_long.len and mem.eql(u8, arg[0..output_long.len], output_long)) {
-                ret.output_filename = arg[output_long.len..];
+                if (pair.addOutput(arg[output_long.len..])) |_pair| try list.append(_pair);
             } else if (mem.eql(u8, arg, "-h") or mem.eql(u8, arg, "--help")) {
                 exitHelp(executable, 0);
             } else {
-                ret.input_filename = arg;
+                if (pair.addInput(arg)) |_pair| try list.append(_pair);
             }
         }
-        return ret;
+        if (!pair.isNull()) try list.append(pair);
+        const pairs = try list.toOwnedSlice();
+
+        const opts = Options{ .allocator = allocator, .pairs = pairs };
+        try opts.checkValidity();
+        return opts;
     }
 };
 fn exitHelp(executable: [:0]const u8, exit_status: u8) void {
