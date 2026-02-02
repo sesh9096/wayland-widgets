@@ -54,26 +54,28 @@ pub fn main() !void {
     // notifications
     // notifications.Notifications.registerSignalHandler();
     var notification_id: u32 = 0;
-    try notifications.notifications.Notify(
-        .{
-            .summary = "started serve",
-            .app_name = "app",
-            .replaces_id = 0,
-            .app_icon = "",
-            .body = "",
-            .actions = &.{},
-            .hints = &.{},
-            .expire_timeout = -1,
-        },
-        &notification_id,
-        handleNotifyReturn,
-        null,
-    );
+    const pending = try notifications.notifications.Notify(.{
+        .summary = "started serve",
+        .app_name = "app",
+        .replaces_id = 0,
+        .app_icon = "",
+        .body = "",
+        .actions = &.{},
+        .hints = &.{},
+        .expire_timeout = -1,
+    });
+    try pending.setNotify(&notification_id, handleNotifyReturn, null);
 
-    var status_notifier_watcher = StatusNotifierWatcher{};
-    status_notifier_watcher.register(dbus_connection, "org.kde.StatusNotifierWatcher", "/StatusNotifierWatcher");
-    status_notifier_watcher.statusNotifierWatcher.setSignalHandler(@as(*anyopaque, undefined), handleStatusNotifierWatcherSignal);
-    defer status_notifier_watcher.unRegister();
+    var _status_notifier_watcher = StatusNotifierWatcher{};
+    _status_notifier_watcher.register(dbus_connection, "org.kde.StatusNotifierWatcher", "/StatusNotifierWatcher");
+    defer _status_notifier_watcher.unRegister();
+    const status_notifier_watcher = &_status_notifier_watcher.statusNotifierWatcher;
+    status_notifier_watcher.setSignalHandler(@as(*anyopaque, undefined), handleStatusNotifierWatcherSignal);
+    const pending_registered_items = try status_notifier_watcher.getRegisteredStatusNotifierItems();
+    try pending_registered_items.setNotify(@as(*anyopaque, undefined), handleGetStatusNotifierWatcherItems, null);
+
+    const pending_version = try status_notifier_watcher.getProtocolVersion();
+    try pending_version.setNotify(@as(*anyopaque, undefined), handleGetProtocolVersion, null);
 
     // var menu = DBusMenu{};
     // menu.register(dbus_connection, "bus_name", "object_path");
@@ -262,11 +264,18 @@ pub fn markDirty(surface: *Surface) void {
 }
 fn handleNotifyReturn(args: Notifications.NotificationsInterface.NotifyReturnArgs, ptr: *u32) void {
     ptr.* = args.id;
+    log.info("notification id: {}", .{args.id});
 }
 fn handleStatusNotifierWatcherSignal(_: *StatusNotifierWatcher.StatusNotifierWatcherInterface, signal: StatusNotifierWatcher.StatusNotifierWatcherInterface.Signal, _: *anyopaque) void {
     switch (signal) {
         inline else => |payload, tag| log.debug("{s}({})", .{ @tagName(tag), dbus.argStructPrinter(payload) }),
     }
+}
+fn handleGetStatusNotifierWatcherItems(args: []const [*:0]const u8, _: *anyopaque) void {
+    log.debug("status notifier items: {}", .{dbus.argStructPrinter(.{args})});
+}
+fn handleGetProtocolVersion(arg: i32, _: *anyopaque) void {
+    log.debug("protocol version: {}", .{arg});
 }
 
 test {

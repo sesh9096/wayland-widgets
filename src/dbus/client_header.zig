@@ -73,10 +73,7 @@ fn methodCallGeneric(
     method_name: [:0]const u8,
     args: anytype,
     ReplyArgsType: type,
-    data: anytype,
-    callback: fn (ReplyArgsType, @TypeOf(data)) void,
-    free_callback: ?fn (@TypeOf(data)) void,
-) Allocator.Error!void {
+) Allocator.Error!dbus.MethodPendingCall(ReplyArgsType) {
     const self: *Self = @fieldParentPtr(interface_field_name, interface);
     const connection = self.connection;
     const message = dbus.Message.newMethodCall(
@@ -88,34 +85,37 @@ fn methodCallGeneric(
     errdefer message.unref();
     try message.appendArgsAnytype(args);
 
-    var pending_return: *dbus.PendingCall = undefined;
-    const function = struct {
-        pub fn _function(pending: *dbus.PendingCall, user_data: *anyopaque) callconv(.C) void {
-            if (pending.getCompleted()) {
-                const reply = pending.stealReply().?;
-                defer reply.unref();
-                dbus.handleMessageNoreturn(reply, callback, @alignCast(@ptrCast(user_data)));
-            }
-        }
-    }._function;
-
-    const free_function = if (free_callback) |_free_callback| struct {
-        pub fn _function(user_data: *anyopaque) callconv(.C) void {
-            _free_callback(@alignCast(@ptrCast(user_data)));
-        }
-    }._function else null;
-
-    if (!connection.sendWithReply(message, &pending_return, -1)) return error.OutOfMemory;
-    if (!pending_return.setNotify(function, @alignCast(@ptrCast(data)), free_function)) return error.OutOfMemory;
+    var pending_return: dbus.MethodPendingCall(ReplyArgsType) = undefined;
+    if (!connection.sendWithReply(message, &pending_return.p, -1)) return error.OutOfMemory;
+    return pending_return;
 }
 fn getPropertyGeneric(
     interface: anytype,
     comptime interface_field_name: [:0]const u8,
-    property_name: [:0]const u8,
+    property_name: [*:0]const u8,
     PropertyType: type,
-    data: anytype,
-    callback: fn (PropertyType, @TypeOf(data)) void,
-    free_callback: ?fn (@TypeOf(data)) void,
+) Allocator.Error!dbus.GetPropertyPendingCall(PropertyType) {
+    const self: *Self = @fieldParentPtr(interface_field_name, interface);
+    const connection = self.connection;
+    const message = dbus.Message.newMethodCall(
+        self.bus_name,
+        self.path,
+        "org.freedesktop.DBus.Properties",
+        "Get",
+    ) orelse return error.OutOfMemory;
+    errdefer message.unref();
+    const interface_name: [*:0]const u8 = @typeInfo(@TypeOf(interface)).Pointer.child.interface;
+    try message.appendArgsAnytype(.{ interface_name, property_name });
+
+    var pending_return: dbus.GetPropertyPendingCall(PropertyType) = undefined;
+    if (!connection.sendWithReply(message, &pending_return.p, -1)) return error.OutOfMemory;
+    return pending_return;
+}
+fn setPropertyGeneric(
+    interface: anytype,
+    comptime interface_field_name: [:0]const u8,
+    property_name: [*:0]const u8,
+    value: anytype,
 ) Allocator.Error!void {
     const self: *Self = @fieldParentPtr(interface_field_name, interface);
     const connection = self.connection;
@@ -123,44 +123,17 @@ fn getPropertyGeneric(
         self.bus_name,
         self.path,
         "org.freedesktop.DBus.Properties",
-        "Get",
+        "Set",
     ) orelse return error.OutOfMemory;
     errdefer message.unref();
-    if (!message.appendArgs(.{ interface.interface, property_name })) return error.OutOfMemory;
-
-    var pending_return: *dbus.PendingCall = undefined;
-    const function = struct {
-        pub fn _function(pending: *dbus.PendingCall, user_data: *anyopaque) callconv(.C) void {
-            if (pending.getCompleted) {
-                const reply = pending.stealReply().?;
-                defer reply.unref();
-
-                var iter: dbus.MessageIter = undefined;
-                var sub_iter: dbus.MessageIter = undefined;
-                reply.iterInit(&iter);
-                iter.recurse(sub_iter);
-                if (iter.getElementType() != .variant) {
-                    log.err("get args failed, expected variant", .{});
-                    // TODO: error handling?
-                    unreachable;
-                }
-                var property: PropertyType = undefined;
-                var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-                defer _ = arena.reset(.free_all); // potentially make more efficient?
-                sub_iter.getAnytype(arena.allocator(), &property);
-                callback(property, @alignCast(@ptrCast(user_data)));
-            }
-        }
-    }._function;
-
-    const free_function = if (free_callback) |_free_callback| struct {
-        pub fn _function(user_data: *anyopaque) callconv(.C) void {
-            _free_callback(@alignCast(@ptrCast(user_data)));
-        }
-    }._function else null;
-
-    if (!pending_return.setNotify(function, data, free_function)) return error.OutOfMemory;
-    if (!connection.sendWithReply(message, &pending_return, -1)) return error.OutOfMemory;
+    const interface_name: [*:0]const u8 = @typeInfo(@TypeOf(interface)).Pointer.child.interface;
+    if (!message.appendArgs(.{
+        interface_name,
+        property_name,
+        @unionInit(dbus.Arg, @tagName(dbus.Arg.fromType(@TypeOf(value))), value),
+    })) return error.OutOfMemory;
+    message.setNoReply(true);
+    if (!connection.send(message, null)) return error.OutOfMemory;
 }
 
 connection: *dbus.Connection = undefined,

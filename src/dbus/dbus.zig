@@ -268,12 +268,30 @@ pub const Message = opaque {
     pub const setSerial = dbus_message_set_serial;
 
     pub extern fn dbus_message_set_no_reply(message: *Message, no_reply: dbus_bool_t) void;
-    pub const setNoReply = dbus_message_set_no_reply;
+    pub inline fn setNoReply(message: *Message, no_reply: bool) void {
+        return dbus_message_set_no_reply(message, if (no_reply) .true else .false);
+    }
 
     pub extern fn dbus_message_get_no_reply(message: *Message) dbus_bool_t;
     pub inline fn getNoReply(message: *Message) bool {
         return dbus_message_get_no_reply(message) == .true;
     }
+
+    pub extern fn dbus_message_set_error_name(message: *Message, error_name: ?[*:0]const u8) dbus_bool_t;
+    pub inline fn setErrorName(message: *Message, error_name: ?[*:0]const u8) bool {
+        return dbus_message_set_error_name(message, error_name) == .true;
+    }
+
+    pub extern fn dbus_message_get_error_name(message: *Message) ?[*:0]const u8;
+    pub const getErrorName = dbus_message_get_error_name;
+
+    pub extern fn dbus_message_set_destination(message: *Message, destination: ?[*:0]const u8) dbus_bool_t;
+    pub inline fn setDestination(message: *Message, destination: ?[*:0]const u8) bool {
+        return dbus_message_set_destination(message, destination) == .true;
+    }
+
+    pub extern fn dbus_message_get_destination(message: *Message) ?[*:0]const u8;
+    pub const getDestination = dbus_message_get_destination;
 
     pub extern fn dbus_message_get_args(message: *Message, @"error": ?*Error, first_arg_type: ArgType, ...) dbus_bool_t;
     pub const getArgs = dbus_message_get_args;
@@ -423,8 +441,8 @@ pub const MessageIter = extern struct {
                 if (!iter.appendBasic(.double, ptr)) return error.OutOfMemory;
             },
             .Array => |array| {
-                if (array.child == u8 and array.sentinel != null and @as(*u8, array.sentinel.?).* == 0) {
-                    if (!iter.appendBasic(.string, ptr)) return error.OutOfMemory;
+                if (array.child == u8 and array.sentinel != null and @as(*const u8, @ptrCast(array.sentinel.?)).* == 0) {
+                    if (!iter.appendBasic(.string, @ptrCast(&@as([*:0]const u8, arg)))) return error.OutOfMemory;
                 } else {
                     var sub_iter: MessageIter = undefined;
                     const signature = getSignature(array.child) ++ [_]u8{0};
@@ -682,18 +700,6 @@ pub fn fnParams(function: anytype) []const std.builtin.Type.Fn.Param {
     return fn_info.params;
 }
 
-/// callback must be a function taking in 2 arguments, a pointer to some data, and an args tuple/struct with no return
-/// Ex: fn(*Mydata, struct{i32, [*:0] const u8}) void {...}
-/// argument types must match with the message given
-pub fn handleMessageNoreturn(message: *Message, callback: anytype, user_data: fnParams(callback)[1].type.?) void {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer _ = arena.reset(.free_all); // potentially make more efficient?
-
-    // argument list
-    const args = message.getArgsAnytype(fnParams(callback)[0].type.?, arena.allocator()) catch unreachable;
-    // grab arguemnts
-    callback(args, user_data);
-}
 /// invoke the function after parsing message args and return resulting function return
 pub fn handleMethodCall(interface: anytype, message: *Message, function: anytype) Allocator.Error!*Message {
     assert(@typeInfo(@TypeOf(interface)) == .Pointer);
@@ -1210,8 +1216,9 @@ pub const PendingCall = opaque {
     pub extern fn dbus_pending_call_steal_reply(pending: *PendingCall) ?*Message;
     pub const stealReply = dbus_pending_call_steal_reply;
 
-    // void 	dbus_pending_call_block (DBusPendingCall *pending)
-    //  	Block until the pending call is completed.
+    /// Block until the pending call is completed.
+    pub extern fn dbus_pending_call_block(pending: *PendingCall) void;
+    pub const block = dbus_pending_call_block;
 
     // dbus_bool_t 	dbus_pending_call_allocate_data_slot (dbus_int32_t *slot_p)
     //  	Allocates an integer ID to be used for storing application-specific data on any DBusPendingCall.
@@ -1226,6 +1233,119 @@ pub const PendingCall = opaque {
     //  	Retrieves data previously set with dbus_pending_call_set_data().
 
 };
+/// get a typed wrapper around a libdbus PendingCall for a method call
+pub fn MethodPendingCall(ReplyArgsType: type) type {
+    return struct {
+        p: *PendingCall,
+        const Self = @This();
+        pub fn setNotify(
+            self: Self,
+            data: anytype,
+            callback: fn (ReplyArgsType, @TypeOf(data)) void,
+            free_callback: ?fn (@TypeOf(data)) void,
+        ) Allocator.Error!void {
+            const function = struct {
+                pub fn _function(pending: *PendingCall, user_data: *anyopaque) callconv(.C) void {
+                    assert(pending.getCompleted());
+                    const reply = pending.stealReply().?;
+                    defer reply.unref();
+                    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+                    defer _ = arena.reset(.free_all); // potentially make more efficient?
+
+                    // argument list
+                    const args = reply.getArgsAnytype(fnParams(callback)[0].type.?, arena.allocator()) catch |err| {
+                        log.err("got error when parsing {?s}.{?s}: {}", .{ reply.getInterface(), reply.getMember(), err });
+                        return;
+                    };
+                    // grab arguemnts
+                    callback(args, @alignCast(@ptrCast(user_data)));
+                }
+            }._function;
+
+            const free_function = if (free_callback) |_free_callback| struct {
+                pub fn _function(user_data: *anyopaque) callconv(.C) void {
+                    _free_callback(@alignCast(@ptrCast(user_data)));
+                }
+            }._function else null;
+            if (!self.p.setNotify(function, @alignCast(@ptrCast(data)), free_function)) return error.OutOfMemory;
+        }
+        pub inline fn cancel(self: *Self) void {
+            self.p.cancel();
+        }
+        pub inline fn getCompleted(self: *Self) bool {
+            return self.p.getCompleted();
+        }
+        pub inline fn block(self: *Self) void {
+            self.p.block();
+        }
+    };
+}
+/// get a typed wrapper around a libdbus PendingCall for a call to the 'Get' method
+pub fn GetPropertyPendingCall(PropertyType: type) type {
+    return struct {
+        p: *PendingCall,
+        const Self = @This();
+        pub fn setNotify(
+            self: Self,
+            data: anytype,
+            callback: fn (PropertyType, @TypeOf(data)) void,
+            free_callback: ?fn (@TypeOf(data)) void,
+        ) Allocator.Error!void {
+            const function = struct {
+                pub fn _function(pending: *PendingCall, user_data: *anyopaque) callconv(.C) void {
+                    assert(pending.getCompleted());
+                    const reply = pending.stealReply().?;
+                    defer reply.unref();
+                    switch (reply.getType()) {
+                        .method_return => {},
+                        .@"error" => {
+                            log.err("got error {?s}:{s}", .{ reply.getErrorName(), (reply.getArgsAnytype(struct { [*:0]const u8 }, std.testing.failing_allocator) catch unreachable)[0] });
+                            return;
+                        },
+                        else => |tag| {
+                            log.err("unexpected {}", .{tag});
+                            unreachable;
+                        },
+                    }
+
+                    var iter: MessageIter = undefined;
+                    var sub_iter: MessageIter = undefined;
+                    assert(reply.iterInit(&iter));
+                    if (iter.getArgType() != .variant) {
+                        log.err("get args failed, expected variant, got {}", .{iter.getArgType()});
+                        // TODO: error handling by user?
+                        return;
+                    }
+                    iter.recurse(&sub_iter);
+                    var property: PropertyType = undefined;
+                    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+                    defer _ = arena.reset(.free_all); // potentially make more efficient?
+                    sub_iter.getAnytype(arena.allocator(), &property) catch |err| {
+                        log.err("got error when parsing {?s}.{?s}: {}", .{ reply.getInterface(), reply.getMember(), err });
+                        return;
+                    };
+                    callback(property, @alignCast(@ptrCast(user_data)));
+                }
+            }._function;
+
+            const free_function = if (free_callback) |_free_callback| struct {
+                pub fn _function(user_data: *anyopaque) callconv(.C) void {
+                    _free_callback(@alignCast(@ptrCast(user_data)));
+                }
+            }._function else null;
+            if (!self.p.setNotify(function, @alignCast(@ptrCast(data)), free_function)) return error.OutOfMemory;
+        }
+        pub inline fn cancel(self: *Self) void {
+            self.p.cancel();
+        }
+        pub inline fn getCompleted(self: *Self) bool {
+            return self.p.getCompleted();
+        }
+        pub inline fn block(self: *Self) void {
+            self.p.block();
+        }
+    };
+}
 
 /// Not actually in spec but commonly used
 pub const VardictEntry = DictEntry([*:0]const u8, Arg);
@@ -1289,13 +1409,20 @@ pub fn ArgStructPrinter(ArgStruct: type) type {
                             return;
                         }
                     }
+                    if (info.size == .One and @typeInfo(info.child) == .Array) {
+                        const ainfo = @typeInfo(info.child).Array;
+                        if (ainfo.child == u8 and @as(*const u8, @ptrCast(ainfo.sentinel)).* == 0) {
+                            try writer.print("\"{s}\"", .{field});
+                            return;
+                        }
+                    }
                     if (info.size == .Slice) {
+                        try writer.writeByte('[');
                         for (field, 0..) |elem, i| {
-                            try writer.writeByte('[');
                             try printField(elem, writer);
                             if (i != field.len - 1) try writer.writeAll(", ");
-                            try writer.writeByte(']');
                         }
+                        try writer.writeByte(']');
                         return;
                     }
                 },

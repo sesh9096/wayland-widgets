@@ -97,8 +97,8 @@ pub fn writeProxy(node: introspection.Node, output: anytype) !void {
 
         for (interface.methods) |method| {
             try output.print(
-                \\    pub fn {s}(self: *{s}, args: {0s}Args, data: anytype, callback: fn ({0s}ReturnArgs, @TypeOf(data)) void, free_callback: ?fn (@TypeOf(data)) void) !void {{
-                \\        try methodCallGeneric(self, "{s}", "{0s}", args, {0s}ReturnArgs, data, callback, free_callback);
+                \\    pub fn {s}(self: *{s}, args: {0s}Args) !dbus.MethodPendingCall({0s}ReturnArgs) {{
+                \\        return methodCallGeneric(self, "{s}", "{0s}", args, {0s}ReturnArgs);
                 \\    }}
                 \\
             , .{ method.name, interface_type_name, interface_field_name });
@@ -127,8 +127,8 @@ pub fn writeProxy(node: introspection.Node, output: anytype) !void {
             const property_type = ZigTypePrinter{ .s = property.type };
             if (property.access == .read or property.access == .readwrite) {
                 try output.print(
-                    \\    pub fn get{s}(self: *{s}, data: anytype, callback: fn ({}, @TypeOf(data)) void, free_callback: ?fn (@TypeOf(data)) void) !void {{
-                    \\        try getPropertyGeneric(self, "{s}", "{0s}", {2}, data, callback, free_callback);
+                    \\    pub fn get{s}(self: *{s}) !dbus.GetPropertyPendingCall({}) {{
+                    \\        return getPropertyGeneric(self, "{s}", "{0s}", {2});
                     \\    }}
                     \\
                 , .{ property.name, interface_type_name, property_type, interface_field_name });
@@ -136,7 +136,7 @@ pub fn writeProxy(node: introspection.Node, output: anytype) !void {
             if (property.access == .write or property.access == .readwrite) {
                 try output.print(
                     \\    pub fn set{s}(self: *{s}, value: {}) !void {{
-                    \\        try setPropertyGeneric(self, "{s}", "{0s}", {2}, value);
+                    \\        try setPropertyGeneric(self, "{s}", "{0s}", value);
                     \\    }}
                     \\
                 , .{ property.name, interface_type_name, property_type, interface_field_name });

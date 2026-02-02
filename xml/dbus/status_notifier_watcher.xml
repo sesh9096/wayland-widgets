@@ -48,9 +48,7 @@
     </signal>
     <signal name="StatusNotifierHostRegistered"/>
     <signal name="StatusNotifierHostUnregistered"/>
-    <property type="as" name="RegisteredStatusNotifierItems" access="read">
-      <annotation name="org.qtproject.QtDBus.QtTypeName.Out0" value="QStringList"/>
-    </property>
+    <property type="as" name="RegisteredStatusNotifierItems" access="read"/>
     <property type="b" name="IsStatusNotifierHostRegistered" access="read"/>
     <property type="i" name="ProtocolVersion" access="read"/>
   </interface>
