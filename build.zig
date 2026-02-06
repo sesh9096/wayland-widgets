@@ -55,13 +55,12 @@ pub fn build(b: *std.Build) void {
 
     // slightly less stupid way to generate dbus client proxies
     var dbus_codegen_step = b.addRunArtifact(dbus_codegen);
-    inline for ([_][2][]const u8{
-        .{ "xml/dbus/DBusMenu.xml", "DBusMenu" },
-        .{ "xml/dbus/status_notifier_watcher.xml", "StatusNotifierWatcher" },
-        .{ "xml/dbus/notify.xml", "Notifications" },
-    }) |pair| {
-        const xml_path = pair[0];
-        const module_name = pair[1];
+    // const proxy_files = b.addWriteFiles();
+    inline for (.{
+        "xml/dbus/DBusMenu.xml",
+        "xml/dbus/StatusNotifierWatcher.xml",
+        "xml/dbus/Notifications.xml",
+    }) |xml_path| {
         const generated_path = comptime blk: {
             const start = if (mem.lastIndexOfScalar(u8, xml_path, '/')) |i| i + 1 else 0;
             const end = mem.lastIndexOf(u8, xml_path, ".xml") orelse xml_path.len;
@@ -69,11 +68,12 @@ pub fn build(b: *std.Build) void {
         };
 
         dbus_codegen_step.addPrefixedFileArg("--input=", b.path(xml_path));
-        const root_path = dbus_codegen_step.addPrefixedOutputFileArg("--output=", generated_path);
-        const generated_module = b.createModule(.{ .root_source_file = root_path });
-        generated_module.addImport("dbus", dbus);
-        exe.root_module.addImport(module_name, generated_module);
+        _ = dbus_codegen_step.addPrefixedOutputFileArg("--output=", generated_path);
     }
+    const dbus_proxy_root_path = dbus_codegen_step.addPrefixedOutputFileArg("--root=", "dbus_clients.zig");
+    const dbus_proxy_module = b.createModule(.{ .root_source_file = dbus_proxy_root_path });
+    dbus_proxy_module.addImport("dbus", dbus);
+    exe.root_module.addImport("dbus-clients", dbus_proxy_module);
     b.installArtifact(exe);
 
     const run_cmd = b.addRunArtifact(exe);

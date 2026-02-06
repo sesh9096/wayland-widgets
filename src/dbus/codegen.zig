@@ -15,7 +15,6 @@ pub fn main() !void {
     const allocator = arena_allocator.allocator();
     defer _ = arena_allocator.reset(.free_all);
     const options = try Options.parseArgs(allocator);
-    defer options.deinit();
     const cwd = std.fs.cwd();
 
     for (options.pairs) |pair| {
@@ -46,7 +45,27 @@ pub fn main() !void {
         try writeProxy(node, output);
     }
     // log.debug("{}", .{node});
+    if (options.root) |root_filename| {
+        const root_file = cwd.createFile(root_filename, .{}) catch {
+            log.err("unable to open: {s}", .{root_filename});
+            return error.FileNotFound;
+        };
+        defer root_file.close();
+        var bw = std.io.bufferedWriter(root_file.writer());
+        defer bw.flush() catch unreachable;
+        const writer = bw.writer();
+        for (options.pairs) |pair| {
+            const type_name = blk: {
+                const start = if (mem.lastIndexOfScalar(u8, pair.output_filename.?, '/')) |i| i + 1 else 0;
+                const end = mem.lastIndexOf(u8, pair.output_filename.?, ".zig") orelse pair.output_filename.?.len;
+                break :blk pair.output_filename.?[start..end];
+            };
+            const start = if (mem.lastIndexOfScalar(u8, pair.output_filename.?, '/')) |i| i + 1 else 0;
+            try writer.print("pub const @\"{s}\" = @import(\"{s}\");\n", .{ type_name, pair.output_filename.?[start..] });
+        }
+    }
 }
+
 pub fn writeProxy(node: introspection.Node, output: anytype) !void {
     try output.writeAll(client_header);
     // interface fields
@@ -152,6 +171,7 @@ pub fn writeProxy(node: introspection.Node, output: anytype) !void {
 pub const Options = struct {
     allocator: std.mem.Allocator,
     pairs: []Pair,
+    root: ?[:0]const u8 = null,
     pub const Pair = struct {
         input_filename: ?[:0]const u8 = null,
         output_filename: ?[:0]const u8 = null,
@@ -219,21 +239,31 @@ pub const Options = struct {
     pub fn parseArgs(allocator: mem.Allocator) !Options {
         var list = std.ArrayList(Pair).init(allocator);
         var pair = Pair{};
+        var opts = Options{
+            .allocator = allocator,
+            .pairs = undefined,
+            .root = null,
+        };
 
         var args = std.process.args();
         const executable = args.next().?;
 
+        const input_long = "--input=";
+        const output_long = "--output=";
+        const root_long = "--root=";
         while (args.next()) |arg| {
-            const input_long = "--input=";
-            const output_long = "--output=";
             if (mem.eql(u8, arg, "-i")) {
                 if (pair.addInput(args.next().?)) |_pair| try list.append(_pair);
-            } else if (arg.len >= input_long.len and mem.eql(u8, arg[0..input_long.len], input_long)) {
+            } else if (argLongMatch(arg, input_long)) {
                 if (pair.addInput(arg[input_long.len..])) |_pair| try list.append(_pair);
             } else if (mem.eql(u8, arg, "-o")) {
                 if (pair.addOutput(args.next().?)) |_pair| try list.append(_pair);
-            } else if (arg.len >= input_long.len and mem.eql(u8, arg[0..output_long.len], output_long)) {
+            } else if (argLongMatch(arg, output_long)) {
                 if (pair.addOutput(arg[output_long.len..])) |_pair| try list.append(_pair);
+            } else if (mem.eql(u8, arg, "-r")) {
+                if (pair.addOutput(args.next().?)) |_pair| try list.append(_pair);
+            } else if (argLongMatch(arg, root_long)) {
+                opts.root = arg[root_long.len..];
             } else if (mem.eql(u8, arg, "-h") or mem.eql(u8, arg, "--help")) {
                 exitHelp(executable, 0);
             } else {
@@ -242,23 +272,31 @@ pub const Options = struct {
         }
         if (!pair.isNull()) try list.append(pair);
         const pairs = try list.toOwnedSlice();
+        opts.pairs = pairs;
 
-        const opts = Options{ .allocator = allocator, .pairs = pairs };
         try opts.checkValidity();
         return opts;
+    }
+    pub inline fn argLongMatch(arg: [:0]const u8, prefix: [:0]const u8) bool {
+        return arg.len >= prefix.len and mem.eql(u8, arg[0..prefix.len], prefix);
     }
 };
 fn exitHelp(executable: [:0]const u8, exit_status: u8) void {
     std.io.getStdOut().writer().print(
         \\usage:
         \\ {0s} OPTIONS...
-        \\generate zig client code from an xml file for a dbus object
+        \\
+        \\ Generate zig client code from an xml file for a dbus object.
+        \\ If specified, the root file will contain declarations to generated proxies
+        \\ with names as the base filename without the ".zig" extensions
         \\options:
         \\ -h, --help                 print help
         \\ -i, --input=<filename>     specify input file, default to stdin
         \\ -o, --output=<filename>    specify output file, default to stdout
+        \\ -r, --root=<filename>      specify file for root of module
         \\example:
-        \\ {0s} -i notify.xml -o notify.zig
+        \\ {0s} -i notify.xml -o notify.zig ...
+        \\ {0s} -r rootfile.zig -i notify.xml -o notify.zig ...
         \\
     , .{executable}) catch unreachable;
     std.process.exit(exit_status);
