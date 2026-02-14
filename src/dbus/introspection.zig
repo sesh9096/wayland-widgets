@@ -1,6 +1,7 @@
 const std = @import("std");
 const log = std.log;
 const mem = std.mem;
+const testing = std.testing;
 const assert = std.debug.assert;
 const dbus = @import("dbus.zig");
 const Parser = @import("xml.zig").Parser;
@@ -598,43 +599,55 @@ pub fn main() !void {
         try node.xml(stdout, .{ .include_default_interfaces = false });
     }
 }
-// pub const PullParser = struct {
-//     state: State = .normal,
-//     text: []const u8,
-//     pub const State = enum { normal };
-//     pub const Entity = union(enum) {
-//     };
-//     pub fn parse(self: *PullParser, text: []const u8) void {
-//         _ = self;
-//         for (text) |char| {
-//             switch (char) {
-//                 '<' => {},
-//                 else => {
-//                 },
-//             }
-//         }
-//         // const reader = self.reader;
-//         // reader.read;
-//     }
-//     pub fn next(self: *PullParser)?Node{}
-// };
-// // pub const Node = struct {
-// //     name: []const u8,
-// //     attributes: [][]const u8,
-// //     children: []const Node = &.{},
-// // };
+pub fn freeParsed(parsed: anytype, allocator: mem.Allocator) void {
+    switch (@typeInfo(@TypeOf(parsed))) {
+        .Pointer => |info| {
+            if (info.size == .Slice and info.child != u8) {
+                for (parsed) |elem| {
+                    freeParsed(elem, allocator);
+                }
+                allocator.free(parsed);
+            }
+        },
+        .Struct => |info| {
+            inline for (info.fields) |field| {
+                freeParsed(@field(parsed, field.name), allocator);
+            }
+        },
+        else => {},
+    }
+}
 
-// pub fn main() !void {
-//     var args = std.process.args();
-//     _ = args.next();
-//     const cwd = std.fs.cwd();
-//     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-//     const allocator = gpa.allocator();
-//     var parser = PullParser{};
-//     while (args.next()) |arg| {
-//         const file = try cwd.openFile(arg, .{});
-//         defer file.close();
-//         const buf = try file.readToEndAlloc(allocator, 0x1000000);
-//         parser.parse(buf);
-//     }
-// }
+test "introspection with allocators" {
+    const allocator = testing.allocator;
+    const node = Node{ .name = "", .interfaces = &.{
+        .{
+            .name = "org.testing.test",
+            .methods = &.{
+                .{ .name = "Test", .args = &.{
+                    .{ .name = "test1", .type = "i", .direction = .in },
+                    .{ .name = "test2", .type = "s", .direction = .in },
+                    .{ .name = "test3", .type = "a{sv}", .direction = .out },
+                } },
+            },
+            .signals = &.{
+                .{ .name = "Signal", .args = &.{
+                    .{ .name = "test1", .type = "i", .direction = .out },
+                    .{ .name = "test2", .type = "s", .direction = .out },
+                } },
+            },
+            .properties = &.{
+                .{ .name = "Version", .type = "u", .access = .read, .annotations = &.{.{ .name = "org.a.b", .value = "val" }} },
+            },
+        },
+    } };
+    var al = std.ArrayList(u8).init(allocator);
+    defer al.deinit();
+    try node.xml(al.writer(), .{});
+    try al.append(0);
+    const xml_string: [:0]const u8 = @ptrCast(al.items[0 .. al.items.len - 1]);
+    const parsed_node = try parse(xml_string, true, allocator);
+
+    defer freeParsed(parsed_node, allocator);
+    try testing.expectEqualDeep(node, parsed_node);
+}

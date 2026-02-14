@@ -1,5 +1,6 @@
 const std = @import("std");
 const log = std.log;
+const testing = std.testing;
 const Allocator = std.mem.Allocator;
 pub const introspection = @import("introspection.zig");
 const assert = std.debug.assert;
@@ -454,7 +455,7 @@ pub const MessageIter = extern struct {
                     if (!iter.appendBasic(.string, @ptrCast(&@as([*:0]const u8, arg)))) return error.OutOfMemory;
                 } else {
                     var sub_iter: MessageIter = undefined;
-                    const signature = getSignature(array.child) ++ [_]u8{0};
+                    const signature = getSignature(array.child);
                     if (!iter.openContainer(.array, signature.ptr, &sub_iter)) return error.OutOfMemory;
                     for (if (is_pointer) arg.* else arg) |elem|
                         try sub_iter.appendAnytype(elem);
@@ -466,8 +467,7 @@ pub const MessageIter = extern struct {
                     // Dbus String
                     if (pointer.child == u8 and @as(*const u8, @ptrCast(sentinel)).* == 0)
                         if (!iter.appendBasic(.string, ptr)) return error.OutOfMemory;
-                }
-                switch (pointer.size) {
+                } else switch (pointer.size) {
                     .One => {
                         @compileError("Error: Invalid type " ++ @typeName(pointer.child));
                     },
@@ -475,7 +475,7 @@ pub const MessageIter = extern struct {
                     .Slice => {
                         // Assuming Dbus Array
                         var sub_iter: MessageIter = undefined;
-                        const signature = getSignature(pointer.child) ++ [_]u8{0};
+                        const signature = getSignature(pointer.child);
                         if (!iter.openContainer(.array, signature.ptr, &sub_iter)) return error.OutOfMemory;
                         for (if (is_pointer) arg.* else arg) |elem|
                             try sub_iter.appendAnytype(elem);
@@ -549,6 +549,8 @@ pub const MessageIter = extern struct {
     /// var a: i32;
     /// iter.getAnytype(allocator, &a);
     /// ```
+    /// Note that Arg and Arg.Array are handled specially and, can be used to get either a variant or ordinary value/array
+    /// although using this feature to get anything which can be explicitly typed is generally a mistake
     pub fn getAnytype(iter: *MessageIter, allocator: Allocator, dst: anytype) TypeMismatchOrAllocatorError!void {
         if (@typeInfo(@TypeOf(dst)) != .Pointer or
             @typeInfo(@TypeOf(dst)).Pointer.is_const != false or
@@ -597,14 +599,14 @@ pub const MessageIter = extern struct {
                     if (pointer.child == u8 and @as(*const u8, @ptrCast(sentinel)).* == 0) {
                         if (arg_type != .string) return error.TypeMismatch;
                         iter.getBasic(@ptrCast(dst));
-                        // if (pointer.size == .Slice) dst.len = std.mem.len(dst.ptr);
+                        if (pointer.size == .Slice) dst.len = std.mem.len(dst.ptr);
                     }
                 } else switch (pointer.size) {
                     .One => {
-                        @compileError("Error: Invalid type " ++ @typeName(pointer.child));
+                        @compileError("Error: Invalid destination type " ++ @typeName(ChildType));
                     },
                     .Many => {
-                        @compileError("Error: Invalid type " ++ @typeName(pointer.child));
+                        @compileError("Error: Invalid destination type " ++ @typeName(ChildType));
                     },
                     .Slice => {
                         if (arg_type != .array) return error.TypeMismatch;
@@ -633,15 +635,38 @@ pub const MessageIter = extern struct {
             },
             .Struct => {
                 if (ChildType == Arg.ObjectPath) {
+                    if (arg_type != .object_path) return error.TypeMismatch;
                     iter.getBasic(@ptrCast(&dst.path));
                 } else if (ChildType == Arg.Signature) {
+                    if (arg_type != .signature) return error.TypeMismatch;
                     iter.getBasic(@ptrCast(&dst.signature));
+                } else if (ChildType == Arg.UnixFd) {
+                    if (arg_type != .unix_fd) return error.TypeMismatch;
+                    iter.getBasic(@ptrCast(&dst.fd));
+                } else {
+                    if (isDictEntry(ChildType)) {
+                        if (arg_type != .dict_entry) return error.TypeMismatch;
+                        var sub_iter: MessageIter = undefined;
+                        iter.recurse(&sub_iter);
+                        try sub_iter.getAnytype(allocator, &dst.key);
+                        assert(sub_iter.next());
+                        try sub_iter.getAnytype(allocator, &dst.value);
+                        assert(!sub_iter.next());
+                    } else {
+                        if (arg_type != .@"struct") return error.TypeMismatch;
+                        var sub_iter: MessageIter = undefined;
+                        iter.recurse(&sub_iter);
+                        inline for (@typeInfo(ChildType).Struct.fields) |field| {
+                            try sub_iter.getAnytype(allocator, &@field(dst, field.name));
+                        }
+                    }
                 }
             },
             .Union => {
                 if (ChildType == Arg) {
                     // variant
                     // dst.* = try allocator.create(ArgType);
+                    if (arg_type != .variant) return error.TypeMismatch;
                     var sub_iter: MessageIter = undefined;
                     iter.recurse(&sub_iter);
                     switch (sub_iter.getArgType()) {
@@ -663,18 +688,6 @@ pub const MessageIter = extern struct {
                                     log.err("Unexpected array of invalid", .{});
                                     unreachable;
                                 },
-                                .array => {
-                                    log.err("Not Implemented", .{});
-                                    unreachable;
-                                },
-                                .variant => {
-                                    log.err("Not Implemented", .{});
-                                    unreachable;
-                                },
-                                .@"struct" => {
-                                    log.err("Not Implemented", .{});
-                                    unreachable;
-                                },
                                 .dict_entry => {
                                     log.err("Not Implemented", .{});
                                     unreachable;
@@ -690,14 +703,45 @@ pub const MessageIter = extern struct {
                             unreachable;
                         },
                         .@"struct" => {
-                            unreachable;
+                            dst.* = .{ .@"struct" = try iter.getVariantList(allocator) };
                         },
                         .dict_entry => {
-                            unreachable;
+                            // this works because filling in an Arg will
+                            dst.* = .{ .dict_entry = try allocator.create([2]Arg) };
+                            try sub_iter.getNonVariant(allocator, &dst.dict_entry[0]);
+                            assert(sub_iter.next());
+                            try sub_iter.getNonVariant(allocator, &dst.dict_entry[1]);
+                            assert(!sub_iter.next());
                         },
                         inline else => |tag| {
                             dst.* = @unionInit(Arg, @tagName(tag), undefined);
                             sub_iter.getBasic(@ptrCast(&@field(dst, @tagName(tag))));
+                        },
+                    }
+                } else if (ChildType == Arg.Array) {
+                    // should be inside an array
+                    if (arg_type != .array) return error.TypeMismatch;
+                    switch (iter.getElementType()) {
+                        .invalid => unreachable,
+                        .dict_entry => unreachable,
+                        .@"struct" => {
+                            var sub_iter: MessageIter = undefined;
+                            iter.recurse(&sub_iter);
+                            const element_count = iter.getElementCount();
+                            const buf = try allocator.alloc([]const Arg, @intCast(element_count));
+                            for (buf) |*elem| {
+                                elem.* = try sub_iter.getVariantList(allocator);
+                                _ = sub_iter.next();
+                            }
+                            assert(!sub_iter.next());
+                            dst.* = .{ .@"struct" = buf };
+                            // dst.* = .{.@"struct"  = };
+                            // try iter.getAnytype(allocator, &@field(dst, @tagName(tag)));
+                        },
+                        inline else => |tag| {
+                            // TODO
+                            dst.* = @unionInit(Arg.Array, @tagName(tag), undefined);
+                            try iter.getAnytype(allocator, &@field(dst, @tagName(tag)));
                         },
                     }
                 } else {
@@ -716,6 +760,41 @@ pub const MessageIter = extern struct {
         //     iter.getBasic(dst);
         //     return;
         // }
+    }
+    // get the next argument as a variant useful for getting variant structs
+    pub fn getNonVariant(iter: *MessageIter, allocator: Allocator, dst: *Arg) TypeMismatchOrAllocatorError!void {
+        switch (iter.getArgType()) {
+            .invalid => unreachable,
+            .variant => {
+                // why does dbus allow variants inside variants?
+                dst.* = .{ .variant = try allocator.create(Arg) };
+                try iter.getAnytype(allocator, dst.variant);
+            },
+            .dict_entry => {
+                dst.* = .{ .dict_entry = try allocator.create([2]Arg) };
+                var sub_iter: MessageIter = undefined;
+                iter.recurse(&sub_iter);
+                try sub_iter.getNonVariant(allocator, &dst.dict_entry[0]);
+                assert(sub_iter.next());
+                try sub_iter.getNonVariant(allocator, &dst.dict_entry[1]);
+                assert(!sub_iter.next());
+            },
+            inline else => |tag| {
+                dst.* = @unionInit(Arg, @tagName(tag), undefined);
+                try iter.getAnytype(allocator, &@field(dst, @tagName(tag)));
+            },
+        }
+    }
+    // get the next argument as a variant list, checks if it is a struct
+    pub fn getVariantList(iter: *MessageIter, allocator: Allocator) TypeMismatchOrAllocatorError![]const Arg {
+        var lst = std.ArrayList(Arg).init(allocator);
+        errdefer lst.deinit();
+        var struct_iter: MessageIter = undefined;
+        iter.recurse(&struct_iter);
+        while (struct_iter.hasNext()) : (assert(struct_iter.next())) {
+            try struct_iter.getNonVariant(allocator, try lst.addOne());
+        }
+        return lst.toOwnedSlice();
     }
 };
 pub fn testMatchingTypes(expected_type: type, actual: ArgType) TypeMismatchError!void {
@@ -1041,6 +1120,12 @@ pub export fn printFilter(connection: *Connection, message: *Message, user_data:
 }
 
 pub inline fn getSignature(T: type) [:0]const u8 {
+    comptime {
+        const buf = getSignatureNoSentinel(T);
+        return @ptrCast((buf ++ [_]u8{0})[0..buf.len]);
+    }
+}
+pub inline fn getSignatureNoSentinel(T: type) []const u8 {
     const error_msg = "Cannot convert type " ++ @typeName(T) ++ " to dbus type";
     return switch (@typeInfo(T)) {
         .Bool => "b",
@@ -1061,7 +1146,7 @@ pub inline fn getSignature(T: type) [:0]const u8 {
             else => @compileError(error_msg),
         },
         .Float => "d",
-        .Array => |array| if (array.sentinel) "s" else "a" ++ getSignature(array.child),
+        .Array => |array| if (array.sentinel) "s" else "a" ++ getSignatureNoSentinel(array.child),
         .Pointer => |pointer| if (pointer.sentinel) |sentinel| {
             // Dbus String
             if (pointer.child == u8 and @as(*const u8, @ptrCast(sentinel)).* == 0) {
@@ -1070,8 +1155,8 @@ pub inline fn getSignature(T: type) [:0]const u8 {
                 @compileError(error_msg);
             }
         } else switch (pointer.size) {
-            .One => getSignature(pointer.child),
-            .Slice => "a" ++ getSignature(pointer.child),
+            .One => getSignatureNoSentinel(pointer.child),
+            .Slice => "a" ++ getSignatureNoSentinel(pointer.child),
             else => @compileError(error_msg),
         },
         .Struct => {
@@ -1081,12 +1166,12 @@ pub inline fn getSignature(T: type) [:0]const u8 {
                 return "g";
             }
             const fields = std.meta.fields(T);
-            if (@hasField(T, "key") and @hasField(T, "value") and fields.len == 2) {
-                return "{" ++ getSignature(fields[0].type) ++ getSignature(fields[1].type) ++ "}";
+            if (isDictEntry(T)) {
+                return "{" ++ getSignatureNoSentinel(fields[0].type) ++ getSignatureNoSentinel(fields[1].type) ++ "}";
             } else {
                 var sig = "(";
                 for (fields) |field| {
-                    sig = sig ++ getSignature(field);
+                    sig = sig ++ getSignatureNoSentinel(field);
                 }
                 sig = sig ++ ")";
                 return sig;
@@ -1101,7 +1186,7 @@ pub inline fn getSignature(T: type) [:0]const u8 {
         },
         .Enum => |enum_info| {
             if (enum_info.tag_type != void) {
-                return getSignature(enum_info.tag_type);
+                return getSignatureNoSentinel(enum_info.tag_type);
             }
         },
         else => {
@@ -1232,7 +1317,7 @@ pub const Arg = union(ArgType) {
     unix_fd: UnixFd,
     array: Array,
     variant: *Arg,
-    @"struct": []Arg,
+    @"struct": []const Arg,
     dict_entry: *[2]Arg,
     pub const ObjectPath = struct { path: [*:0]const u8 };
     pub const Signature = struct { signature: [*:0]const u8 };
@@ -1255,8 +1340,12 @@ pub const Arg = union(ArgType) {
         unix_fd: []const UnixFd,
         array: []const Array,
         variant: []const Arg,
-        @"struct": []const []Arg,
+        @"struct": []const []const Arg,
         dict_entry: *[2]Array,
+    };
+    pub const Dictionary = struct {
+        keys: Array,
+        values: Array,
     };
     pub fn payload(self: *const Arg) *const anyopaque {
         return switch (self.*) {
@@ -1435,7 +1524,7 @@ pub fn GetPropertyPendingCall(PropertyType: type) type {
 
 /// Not actually in spec but commonly used
 pub const VardictEntry = DictEntry([*:0]const u8, Arg);
-pub const Vardict = []VardictEntry;
+pub const Vardict = []const VardictEntry;
 
 /// create a function which when called sends a dbus signal.
 /// - ObjectType must have a field `connection` of type `Connection` to send the signal.
@@ -1522,29 +1611,27 @@ pub fn ArgStructPrinter(ArgStruct: type) type {
 pub fn argStructPrinter(arg_struct: anytype) ArgStructPrinter(@TypeOf(arg_struct)) {
     return ArgStructPrinter(@TypeOf(arg_struct)){ .arg_struct = arg_struct };
 }
-// test "introspection" {
-//     std.debug.print("{s}", .{genIntrospection(struct {})});
-// }
 
-pub const Header = extern struct {
-    endianness: Endianness,
-    message_type: u8,
-    flags: u8 = 0,
-    version: u8 = 1,
-    length: u32,
-    serial: u32,
+test {
+    _ = introspection;
+}
 
-    pub const Endianness = enum(u8) { little = 'l', big = 'B' };
-    pub const MessageType = enum(u8) {
-        INVALID = 0,
-        METHOD_CALL = 1,
-        METHOD_RETURN = 2,
-        ERROR = 3,
-        SIGNAL = 4,
+test "message arg adding and parsing" {
+    var arena_allocator = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    const allocator = arena_allocator.allocator();
+    defer _ = arena_allocator.reset(.free_all); // potentially make more efficient?
+    const message = Message.new(.method_call);
+    defer message.unref();
+    const TestArgs = struct {
+        a: i32,
+        b: [:0]const u8,
+        c: Vardict,
     };
-    pub const flags = struct {
-        pub const NO_REPLY_EXPECTED = 0x1;
-        pub const NO_AUTO_START = 0x2;
-        pub const ALLOW_INTERACTIVE_AUTHORIZATION = 0x4;
+    const args = TestArgs{
+        .a = 9,
+        .b = "hello",
+        .c = &.{},
     };
-};
+    try message.appendArgsAnytype(args);
+    try testing.expectEqualDeep(args, message.getArgsAnytype(TestArgs, allocator));
+}
