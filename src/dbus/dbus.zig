@@ -380,6 +380,15 @@ pub const MessageIter = extern struct {
     pub extern fn dbus_message_iter_get_element_count(iter: *MessageIter) c_int;
     pub const getElementCount = dbus_message_iter_get_element_count;
 
+    pub extern fn dbus_message_iter_get_fixed_array(iter: *MessageIter, value: *anyopaque, n_elements: *c_int) void;
+    pub const getFixedArray = dbus_message_iter_get_fixed_array;
+
+    pub fn getFixedArraySlice(iter: *MessageIter, ElementType: type) []const ElementType {
+        var n_elements: c_int = undefined;
+        var value: [*]const ElementType = undefined;
+        iter.getFixedArray(@ptrCast(&value), &n_elements);
+        return value[0..@intCast(n_elements)];
+    }
     // pub extern fn dbus_message_iter_get_array_len(iter: *MessageIter) c_int;
     // pub const getArrayLen = dbus_message_iter_get_array_len;
 
@@ -541,7 +550,9 @@ pub const MessageIter = extern struct {
     /// iter.getAnytype(allocator, &a);
     /// ```
     pub fn getAnytype(iter: *MessageIter, allocator: Allocator, dst: anytype) TypeMismatchOrAllocatorError!void {
-        assert(@typeInfo(@TypeOf(dst)) == .Pointer and @typeInfo(@TypeOf(dst)).Pointer.is_const == false and @typeInfo(@TypeOf(dst)).Pointer.size == .One);
+        if (@typeInfo(@TypeOf(dst)) != .Pointer or
+            @typeInfo(@TypeOf(dst)).Pointer.is_const != false or
+            @typeInfo(@TypeOf(dst)).Pointer.size != .One) @compileError("getAnytype called with invalid type" ++ @typeName(@TypeOf(dst)));
         const ChildType = @typeInfo(@TypeOf(dst)).Pointer.child;
         const arg_type = iter.getArgType();
 
@@ -574,8 +585,10 @@ pub const MessageIter = extern struct {
 
                     var sub_iter: MessageIter = undefined;
                     iter.recurse(&sub_iter);
-                    for (dst.*) |*elem|
+                    for (dst.*) |*elem| {
                         try sub_iter.getAnytype(elem);
+                        _ = sub_iter.next();
+                    }
                 }
             },
             .Pointer => |pointer| {
@@ -595,18 +608,25 @@ pub const MessageIter = extern struct {
                     },
                     .Slice => {
                         if (arg_type != .array) return error.TypeMismatch;
-                        const element_count = iter.getElementCount();
                         const element_type = iter.getElementType();
                         try testMatchingTypes(pointer.child, element_type);
-                        const buf = try allocator.alloc(pointer.child, @intCast(element_count));
 
-                        // basic type
-                        // fallback
                         var sub_iter: MessageIter = undefined;
                         iter.recurse(&sub_iter);
-                        for (buf) |*elem|
-                            try sub_iter.getAnytype(allocator, elem);
-                        dst.* = buf;
+                        if (element_type.isFixed() and element_type != .unix_fd) {
+                            // fixed type
+                            dst.* = sub_iter.getFixedArraySlice(pointer.child);
+                        } else {
+                            // fallback
+                            const element_count = iter.getElementCount();
+                            const buf = try allocator.alloc(pointer.child, @intCast(element_count));
+                            for (buf) |*elem| {
+                                try sub_iter.getAnytype(allocator, elem);
+                                _ = sub_iter.next();
+                            }
+                            assert(!sub_iter.next());
+                            dst.* = buf;
+                        }
                     },
                     .C => @compileError("Intent unclear"),
                 }
@@ -627,17 +647,43 @@ pub const MessageIter = extern struct {
                     switch (sub_iter.getArgType()) {
                         .object_path => {
                             dst.* = .{ .object_path = .{ .path = undefined } };
-                            iter.getBasic(@ptrCast(&dst.object_path.path));
+                            sub_iter.getBasic(@ptrCast(&dst.object_path.path));
                         },
                         .signature => {
                             dst.* = .{ .signature = .{ .signature = undefined } };
-                            iter.getBasic(@ptrCast(&dst.signature.signature));
+                            sub_iter.getBasic(@ptrCast(&dst.signature.signature));
                         },
                         .unix_fd => {
                             dst.* = .{ .unix_fd = .{ .fd = undefined } };
-                            iter.getBasic(@ptrCast(&dst.unix_fd.fd));
+                            sub_iter.getBasic(@ptrCast(&dst.unix_fd.fd));
                         },
                         .array => {
+                            switch (iter.getElementType()) {
+                                .invalid => {
+                                    log.err("Unexpected array of invalid", .{});
+                                    unreachable;
+                                },
+                                .array => {
+                                    log.err("Not Implemented", .{});
+                                    unreachable;
+                                },
+                                .variant => {
+                                    log.err("Not Implemented", .{});
+                                    unreachable;
+                                },
+                                .@"struct" => {
+                                    log.err("Not Implemented", .{});
+                                    unreachable;
+                                },
+                                .dict_entry => {
+                                    log.err("Not Implemented", .{});
+                                    unreachable;
+                                },
+                                inline else => |tag| {
+                                    dst.* = .{ .array = @unionInit(Arg.Array, @tagName(tag), undefined) };
+                                    try sub_iter.getAnytype(allocator, &@field(dst.array, @tagName(tag)));
+                                },
+                            }
                             unreachable;
                         },
                         .variant => {
@@ -1084,6 +1130,26 @@ pub const ArgType = enum(c_int) {
     @"struct" = 'r',
     dict_entry = 'e',
 
+    pub fn isBasic(arg_type: ArgType) bool {
+        return switch (arg_type) {
+            .invaild => {
+                log.err("ArgType.isBasic called with .invalid", .{});
+                return false;
+            },
+            .array, .variant, .@"struct", .dict_entry => false,
+            else => true,
+        };
+    }
+    pub fn isFixed(arg_type: ArgType) bool {
+        return switch (arg_type) {
+            .invalid => {
+                log.err("ArgType.isBasic called with .invalid", .{});
+                return false;
+            },
+            .array, .variant, .@"struct", .dict_entry, .string, .object_path, .signature => false,
+            else => true,
+        };
+    }
     /// return the appropriate dbus arg type corresponding to a type
     pub inline fn fromType(T: type) ?ArgType {
         // comptime for (std.meta.fields(Arg)) |union_field| {
@@ -1164,7 +1230,7 @@ pub const Arg = union(ArgType) {
     object_path: ObjectPath,
     signature: Signature,
     unix_fd: UnixFd,
-    array: []Arg,
+    array: Array,
     variant: *Arg,
     @"struct": []Arg,
     dict_entry: *[2]Arg,
@@ -1172,9 +1238,29 @@ pub const Arg = union(ArgType) {
     pub const Signature = struct { signature: [*:0]const u8 };
     pub const UnixFd = struct { fd: i32 };
 
+    pub const Array = union(ArgType) {
+        invalid: void,
+        byte: []const u8,
+        boolean: []const bool,
+        int16: []const i16,
+        uint16: []const u16,
+        int32: []const i32,
+        uint32: []const u32,
+        int64: []const i64,
+        uint64: []const u64,
+        double: []const f64,
+        string: []const [*:0]const u8,
+        object_path: []const ObjectPath,
+        signature: []const Signature,
+        unix_fd: []const UnixFd,
+        array: []const Array,
+        variant: []const Arg,
+        @"struct": []const []Arg,
+        dict_entry: *[2]Array,
+    };
     pub fn payload(self: *const Arg) *const anyopaque {
         return switch (self.*) {
-            inline .invalid, .byte, .boolean, .int16, .uint16, .int32, .uint32, .int64, .uint64, .double, .string, .object_path, .signature, .unix_fd, .array, .variant, .@"struct", .dict_entry => |*contents| @ptrCast(contents),
+            inline else => |*contents| @ptrCast(contents),
         };
     }
 };
