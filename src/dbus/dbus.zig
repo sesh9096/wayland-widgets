@@ -409,6 +409,11 @@ pub const MessageIter = extern struct {
         return dbus_message_iter_append_fixed_array(iter, element_type, value, n_elements) == .true;
     }
 
+    pub fn appendFixedArraySlice(iter: *MessageIter, slice: anytype) Allocator.Error!void {
+        const element_type = ArgType.fromType(@typeInfo(@TypeOf(slice)).Pointer.child).?;
+        if (!iter.appendFixedArray(element_type, @ptrCast(&slice), @intCast(slice.len))) return error.OutOfMemory;
+    }
+
     pub extern fn dbus_message_iter_open_container(iter: *MessageIter, @"type": ArgType, contained_signature: ?[*:0]const u8, sub: *MessageIter) dbus_bool_t;
     pub inline fn openContainer(iter: *MessageIter, @"type": ArgType, contained_signature: ?[*:0]const u8, sub: *MessageIter) bool {
         return dbus_message_iter_open_container(iter, @"type", contained_signature, sub) == .true;
@@ -443,7 +448,11 @@ pub const MessageIter = extern struct {
         // for appendBasic
         const ptr: *const anyopaque = @ptrCast(if (is_pointer) arg else &arg);
         switch (@typeInfo(T)) {
-            .Bool, .Int => {
+            .Bool => {
+                const dbus_bool: u32 = if (arg) 1 else 0;
+                if (!iter.appendBasic(.boolean, &dbus_bool)) return error.OutOfMemory;
+            },
+            .Int => {
                 if (!iter.appendBasic(ArgType.fromType(T).?, ptr)) return error.OutOfMemory;
             },
             .Float => |float| {
@@ -473,11 +482,15 @@ pub const MessageIter = extern struct {
                     },
                     .Many => {},
                     .Slice => {
+                        const slice = if (is_pointer) arg.* else arg;
                         // Assuming Dbus Array
                         var sub_iter: MessageIter = undefined;
                         const signature = getSignature(pointer.child);
                         if (!iter.openContainer(.array, signature.ptr, &sub_iter)) return error.OutOfMemory;
-                        for (if (is_pointer) arg.* else arg) |elem|
+                        if (ArgType.fromType(pointer.child).?.isFixedArrayElement()) {
+                            try sub_iter.appendFixedArraySlice(slice);
+                        }
+                        for (slice) |elem|
                             try sub_iter.appendAnytype(elem);
                         if (!iter.closeContainer(&sub_iter)) return error.OutOfMemory;
                     },
@@ -489,6 +502,8 @@ pub const MessageIter = extern struct {
                 if (isDictEntry(T)) {
                     var sub_iter: MessageIter = undefined;
                     if (!iter.openContainer(.dict_entry, null, &sub_iter)) return error.OutOfMemory;
+                    try sub_iter.appendAnytype(arg.key);
+                    try sub_iter.appendAnytype(arg.value);
                     if (!iter.closeContainer(&sub_iter)) return error.OutOfMemory;
                 } else {
                     // struct
@@ -504,6 +519,9 @@ pub const MessageIter = extern struct {
             .Enum => |enum_info| {
                 // enum masquerading as a int
                 if (enum_info.tag_type != void) {
+                    if (T == dbus_bool_t) {
+                        if (!iter.appendBasic(.boolean, ptr)) return error.OutOfMemory;
+                    }
                     if (!iter.appendBasic(ArgType.fromType(enum_info.tag_type).?, ptr)) return error.OutOfMemory;
                 } else @compileError("Cannot convert type " ++ @typeName(T) ++ " to dbus type");
             },
@@ -511,7 +529,7 @@ pub const MessageIter = extern struct {
                 if (T == Arg) {
                     // variant
                     // TODO: get signature
-                    const typed_ptr: *const T = @alignCast(@ptrCast(ptr));
+                    const typed_ptr: *const Arg = @alignCast(@ptrCast(ptr));
                     var sig_buf: [4096]u8 = undefined;
                     sig_buf[0] = @intCast(@intFromEnum(typed_ptr.*));
                     sig_buf[1] = 0;
@@ -522,7 +540,7 @@ pub const MessageIter = extern struct {
                         .@"struct" => {},
                         .variant => {},
                         inline else => |*field_ptr, tag| {
-                            if (!iter.appendBasic(tag, @ptrCast(field_ptr))) return error.OutOfMemory;
+                            if (!sub_iter.appendBasic(tag, @ptrCast(field_ptr))) return error.OutOfMemory;
                         },
                     }
                     if (!iter.closeContainer(&sub_iter)) return error.OutOfMemory;
@@ -559,13 +577,18 @@ pub const MessageIter = extern struct {
         const arg_type = iter.getArgType();
 
         switch (@typeInfo(ChildType)) {
-            .Bool, .Int => {
+            .Bool => {
+                if (arg_type != .boolean) return error.TypeMismatch;
+                var dbus_bool: dbus_bool_t = undefined;
+                iter.getBasic(@ptrCast(&dbus_bool));
+                dst.* = dbus_bool == .true;
+            },
+            .Int => {
                 try testMatchingTypes(ChildType, arg_type);
-                if (ArgType.fromType(ChildType) != arg_type) return error.TypeMismatch;
                 iter.getBasic(@ptrCast(dst));
             },
-            .Float => |float| {
-                if (float.bits != 64) @compileError("Expected f64");
+            .Float => |info| {
+                if (info.bits != 64) @compileError("Expected f64");
                 try testMatchingTypes(ChildType, arg_type);
                 if (arg_type != .double) return error.TypeMismatch;
                 iter.getBasic(@ptrCast(dst));
@@ -615,7 +638,7 @@ pub const MessageIter = extern struct {
 
                         var sub_iter: MessageIter = undefined;
                         iter.recurse(&sub_iter);
-                        if (element_type.isFixed() and element_type != .unix_fd) {
+                        if (element_type.isFixedArrayElement()) {
                             // fixed type
                             dst.* = sub_iter.getFixedArraySlice(pointer.child);
                         } else {
@@ -1225,6 +1248,10 @@ pub const ArgType = enum(c_int) {
             else => true,
         };
     }
+    pub fn isFixedArrayElement(element_type: ArgType) bool {
+        // boolean is not possible because zig and dbus represent them differently and unix fd's cannot be added for some reason
+        return element_type.isFixed() and element_type != .unix_fd and element_type != .boolean;
+    }
     pub fn isFixed(arg_type: ArgType) bool {
         return switch (arg_type) {
             .invalid => {
@@ -1612,6 +1639,202 @@ pub fn argStructPrinter(arg_struct: anytype) ArgStructPrinter(@TypeOf(arg_struct
     return ArgStructPrinter(@TypeOf(arg_struct)){ .arg_struct = arg_struct };
 }
 
+// adapted from expectEqualDeep to compare c-strings
+pub fn expectEqualArgs(expected: anytype, actual: anytype) error{TestExpectedEqual}!void {
+    const print = struct {
+        pub fn print(comptime fmt: []const u8, args: anytype) void {
+            if (@inComptime()) {
+                @compileError(std.fmt.comptimePrint(fmt, args));
+            } else if (testing.backend_can_print) {
+                std.debug.print(fmt, args);
+            }
+        }
+    }.print;
+    switch (@typeInfo(@TypeOf(actual))) {
+        .NoReturn,
+        .Opaque,
+        .Frame,
+        .AnyFrame,
+        => @compileError("value of type " ++ @typeName(@TypeOf(actual)) ++ " encountered"),
+
+        .Undefined,
+        .Null,
+        .Void,
+        => return,
+
+        .Type => {
+            if (actual != expected) {
+                print("expected type {s}, found type {s}\n", .{ @typeName(expected), @typeName(actual) });
+                return error.TestExpectedEqual;
+            }
+        },
+
+        .Bool,
+        .Int,
+        .Float,
+        .ComptimeFloat,
+        .ComptimeInt,
+        .EnumLiteral,
+        .Enum,
+        .Fn,
+        .ErrorSet,
+        => {
+            if (actual != expected) {
+                print("expected {}, found {}\n", .{ expected, actual });
+                return error.TestExpectedEqual;
+            }
+        },
+
+        .Pointer => |pointer| {
+            switch (pointer.size) {
+                .Many => {
+                    if (pointer.sentinel) |sentinel| {
+                        if (pointer.child == u8 and @as(*const u8, @ptrCast(sentinel)).* == 0) {
+                            if (std.mem.orderZ(u8, expected, actual) != .eq) {
+                                print("expected {s}, found {s}\n", .{ expected, actual });
+                                return error.TestExpectedEqual;
+                            }
+                            return;
+                        }
+                    }
+                    if (actual != expected) {
+                        print("expected {*}, found {*}\n", .{ expected, actual });
+                        return error.TestExpectedEqual;
+                    }
+                },
+                // We have no idea what is behind those pointers, so the best we can do is `==` check.
+                .C => {
+                    if (actual != expected) {
+                        print("expected {*}, found {*}\n", .{ expected, actual });
+                        return error.TestExpectedEqual;
+                    }
+                },
+                .One => {
+                    // Length of those pointers are runtime value, so the best we can do is `==` check.
+                    switch (@typeInfo(pointer.child)) {
+                        .Fn, .Opaque => {
+                            if (actual != expected) {
+                                print("expected {*}, found {*}\n", .{ expected, actual });
+                                return error.TestExpectedEqual;
+                            }
+                        },
+                        else => try expectEqualArgs(expected.*, actual.*),
+                    }
+                },
+                .Slice => {
+                    if (expected.len != actual.len) {
+                        print("Slice len not the same, expected {d}, found {d}\n", .{ expected.len, actual.len });
+                        return error.TestExpectedEqual;
+                    }
+                    var i: usize = 0;
+                    while (i < expected.len) : (i += 1) {
+                        expectEqualArgs(expected[i], actual[i]) catch |e| {
+                            print("index {d} incorrect. expected {any}, found {any}\n", .{
+                                i, expected[i], actual[i],
+                            });
+                            return e;
+                        };
+                    }
+                },
+            }
+        },
+
+        .Array => |_| {
+            if (expected.len != actual.len) {
+                print("Array len not the same, expected {d}, found {d}\n", .{ expected.len, actual.len });
+                return error.TestExpectedEqual;
+            }
+            var i: usize = 0;
+            while (i < expected.len) : (i += 1) {
+                expectEqualArgs(expected[i], actual[i]) catch |e| {
+                    print("index {d} incorrect. expected {any}, found {any}\n", .{
+                        i, expected[i], actual[i],
+                    });
+                    return e;
+                };
+            }
+        },
+
+        .Vector => |info| {
+            if (info.len != @typeInfo(@TypeOf(actual)).Vector.len) {
+                print("Vector len not the same, expected {d}, found {d}\n", .{ info.len, @typeInfo(@TypeOf(actual)).Vector.len });
+                return error.TestExpectedEqual;
+            }
+            var i: usize = 0;
+            while (i < info.len) : (i += 1) {
+                expectEqualArgs(expected[i], actual[i]) catch |e| {
+                    print("index {d} incorrect. expected {any}, found {any}\n", .{
+                        i, expected[i], actual[i],
+                    });
+                    return e;
+                };
+            }
+        },
+
+        .Struct => |structType| {
+            inline for (structType.fields) |field| {
+                expectEqualArgs(@field(expected, field.name), @field(actual, field.name)) catch |e| {
+                    print("Field {s} incorrect. expected {any}, found {any}\n", .{ field.name, @field(expected, field.name), @field(actual, field.name) });
+                    return e;
+                };
+            }
+        },
+
+        .Union => |union_info| {
+            if (union_info.tag_type == null) {
+                @compileError("Unable to compare untagged union values");
+            }
+
+            const Tag = std.meta.Tag(@TypeOf(expected));
+
+            const expectedTag = @as(Tag, expected);
+            const actualTag = @as(Tag, actual);
+
+            try testing.expectEqual(expectedTag, actualTag);
+
+            // we only reach this loop if the tags are equal
+            switch (expected) {
+                inline else => |val, tag| {
+                    try expectEqualArgs(val, @field(actual, @tagName(tag)));
+                },
+            }
+        },
+
+        .Optional => {
+            if (expected) |expected_payload| {
+                if (actual) |actual_payload| {
+                    try expectEqualArgs(expected_payload, actual_payload);
+                } else {
+                    print("expected {any}, found null\n", .{expected_payload});
+                    return error.TestExpectedEqual;
+                }
+            } else {
+                if (actual) |actual_payload| {
+                    print("expected null, found {any}\n", .{actual_payload});
+                    return error.TestExpectedEqual;
+                }
+            }
+        },
+
+        .ErrorUnion => {
+            if (expected) |expected_payload| {
+                if (actual) |actual_payload| {
+                    try expectEqualArgs(expected_payload, actual_payload);
+                } else |actual_err| {
+                    print("expected {any}, found {any}\n", .{ expected_payload, actual_err });
+                    return error.TestExpectedEqual;
+                }
+            } else |expected_err| {
+                if (actual) |actual_payload| {
+                    print("expected {any}, found {any}\n", .{ expected_err, actual_payload });
+                    return error.TestExpectedEqual;
+                } else |actual_err| {
+                    try expectEqualArgs(expected_err, actual_err);
+                }
+            }
+        },
+    }
+}
 test {
     _ = introspection;
 }
@@ -1626,12 +1849,18 @@ test "message arg adding and parsing" {
         a: i32,
         b: [:0]const u8,
         c: Vardict,
+        d: []const bool,
     };
     const args = TestArgs{
         .a = 9,
         .b = "hello",
-        .c = &.{},
+        .c = &.{
+            .{ .key = "a", .value = .{ .int32 = 8 } },
+            .{ .key = "b", .value = .{ .string = "hello" } },
+            .{ .key = "c", .value = .{ .boolean = true } },
+        },
+        .d = &.{ true, false, false, true },
     };
     try message.appendArgsAnytype(args);
-    try testing.expectEqualDeep(args, message.getArgsAnytype(TestArgs, allocator));
+    try expectEqualArgs(args, try message.getArgsAnytype(TestArgs, allocator));
 }
