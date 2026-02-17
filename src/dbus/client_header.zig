@@ -35,7 +35,20 @@ pub fn signalHandler(connection: *dbus.Connection, message: *dbus.Message, user_
         std.mem.orderZ(u8, message.getPath().?, self.path) == .eq
     // and std.mem.orderZ(u8, message.getSender(), self.bus_name) == .eq
     ) {
-        const ifname = message.getInterface().?;
+        var ifname = message.getInterface().?;
+        if (std.mem.orderZ(u8, ifname, "org.freedesktop.DBus.Properties") == .eq) {
+            if (std.mem.orderZ(u8, message.getMember().?, "PropertiesChanged") == .eq) {
+                if (message.getArgsAnytype(struct { [*:0]const u8 }, std.testing.failing_allocator)) |args| {
+                    ifname = args[0];
+                } else |err| {
+                    log.warn("Got error when parsing PropertiesChanged args: {}", .{err});
+                    return .not_yet_handled;
+                }
+            } else {
+                log.warn("Unknown signal {?s}", .{message.getMember()});
+                return .not_yet_handled;
+            }
+        }
         inline for (@typeInfo(Self).Struct.fields) |field| {
             if (dbus.matchesInterface(field.type, ifname)) {
                 const interface: *field.type = &@field(self, field.name);
@@ -44,6 +57,7 @@ pub fn signalHandler(connection: *dbus.Connection, message: *dbus.Message, user_
                 }
             }
         }
+        log.info("Unknown signal {s}.{?s}", .{ ifname, message.getMember() });
     }
     return .not_yet_handled;
 }
@@ -52,10 +66,16 @@ fn generateSignalHander(handler: anytype) *const fn (@typeInfo(@TypeOf(handler))
         pub fn _function(interface: @typeInfo(@TypeOf(handler)).Fn.params[0].type.?, message: *dbus.Message, user_data: *anyopaque) dbus.HandlerResult {
             const signal_name = message.getMember().?;
             const Signal = @typeInfo(@TypeOf(handler)).Fn.params[1].type.?;
+            var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+            defer _ = arena.reset(.free_all);
+            if (std.mem.orderZ(u8, message.getInterface().?, "org.freedesktop.DBus.Properties") == .eq) {
+                // PropertiesChanged
+                const args = message.getArgsAnytype(PropertiesChangedArgs, arena.allocator()) catch unreachable;
+                handler(interface, Signal{ .PropertiesChanged = args }, user_data);
+                return .handled;
+            }
             inline for (@typeInfo(Signal).Union.fields) |field| {
                 if (std.mem.orderZ(u8, field.name, signal_name) == .eq) {
-                    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-                    defer _ = arena.reset(.free_all);
                     const args = message.getArgsAnytype(field.type, arena.allocator()) catch unreachable;
                     handler(interface, @unionInit(Signal, field.name, args), user_data);
                     return .handled;
@@ -67,6 +87,10 @@ fn generateSignalHander(handler: anytype) *const fn (@typeInfo(@TypeOf(handler))
         }
     }._function;
 }
+const PropertiesChangedArgs = struct {
+    changed_properties: dbus.Vardict,
+    invalidated_properties: []const [*:0]const u8,
+};
 fn methodCallGeneric(
     interface: anytype,
     comptime interface_field_name: [:0]const u8,
@@ -134,6 +158,27 @@ fn setPropertyGeneric(
     })) return error.OutOfMemory;
     message.setNoReply(true);
     if (!connection.send(message, null)) return error.OutOfMemory;
+}
+fn getAllGeneric(
+    interface: anytype,
+    comptime interface_field_name: [:0]const u8,
+    PropertiesType: type,
+) Allocator.Error!dbus.GetAllPendingCall(PropertiesType) {
+    const self: *Self = @fieldParentPtr(interface_field_name, interface);
+    const connection = self.connection;
+    const message = dbus.Message.newMethodCall(
+        self.bus_name,
+        self.path,
+        "org.freedesktop.DBus.Properties",
+        "GetAll",
+    ) orelse return error.OutOfMemory;
+    errdefer message.unref();
+    const interface_name: [*:0]const u8 = @typeInfo(@TypeOf(interface)).Pointer.child.interface;
+    try message.appendArgsAnytype(.{interface_name});
+
+    var pending_return: dbus.GetAllPendingCall(PropertiesType) = undefined;
+    if (!connection.sendWithReply(message, &pending_return.p, -1)) return error.OutOfMemory;
+    return pending_return;
 }
 
 connection: *dbus.Connection = undefined,

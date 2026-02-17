@@ -111,6 +111,7 @@ pub fn writeProxy(node: introspection.Node, output: anytype) !void {
                 }
                 try output.writeAll("},\n");
             }
+            try output.writeAll("        PropertiesChanged: PropertiesChangedArgs,\n");
             try output.writeAll("    };\n");
         }
 
@@ -163,23 +164,23 @@ pub fn writeProxy(node: introspection.Node, output: anytype) !void {
             }
         }
 
-        // try output.writeAll("    pub const Properties = struct {\n");
-        // for (interface.properties) |property| {
-        //     // getall properties
-        //     const property_type = ZigTypePrinter{ .s = property.type };
-        //     if (property.access == .read or property.access == .readwrite) {
-        //         try output.print(
-        //             \\        {}: {},
-        //             \\
-        //         , .{ property.name, property_type });
-        //     }
-        // }
-        // try output.writeAll("    };\n");
-        // try output.print(
-        //     \\    pub fn getAll(self: *{s}) !dbus.GetAllPendingCall({}) {{
-        //     \\        try getAll(self, "{s}", "{0s}", {2}, data, callback, free_callback);
-        //     \\    }}
-        // , .{ interface_type_name, interface_field_name });
+        try output.writeAll("    pub const Properties = struct {\n");
+        for (interface.properties) |property| {
+            // getall properties
+            const property_type = ZigTypePrinter{ .s = property.type };
+            if (property.access == .read or property.access == .readwrite) {
+                try output.print(
+                    \\        {s}: {s},
+                    \\
+                , .{ property.name, property_type });
+            }
+        }
+        try output.writeAll("    };\n");
+        try output.print(
+            \\    pub fn getAll(self: *{s}) !dbus.GetAllPendingCall(Properties) {{
+            \\        try getAllGeneric(self, "{s}", Properties);
+            \\    }}
+        , .{ interface_type_name, interface_field_name });
 
         try output.writeAll("};\n");
     }

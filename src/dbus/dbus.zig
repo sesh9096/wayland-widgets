@@ -1549,6 +1549,95 @@ pub fn GetPropertyPendingCall(PropertyType: type) type {
     };
 }
 
+/// get a typed wrapper around a libdbus PendingCall for a call to the 'GetAll' method
+pub fn GetAllPendingCall(PropertiesType: type) type {
+    return struct {
+        p: *PendingCall,
+        const Self = @This();
+        pub fn setNotify(
+            self: Self,
+            data: anytype,
+            callback: fn (PropertiesType, @TypeOf(data)) void,
+            free_callback: ?fn (@TypeOf(data)) void,
+        ) Allocator.Error!void {
+            const function = struct {
+                pub fn _function(pending: *PendingCall, user_data: *anyopaque) callconv(.C) void {
+                    assert(pending.getCompleted());
+                    const reply = pending.stealReply().?;
+                    defer reply.unref();
+                    switch (reply.getType()) {
+                        .method_return => {},
+                        .@"error" => {
+                            log.err("got error {?s}:{s}", .{ reply.getErrorName(), (reply.getArgsAnytype(struct { [*:0]const u8 }, std.testing.failing_allocator) catch unreachable)[0] });
+                            return;
+                        },
+                        else => |tag| {
+                            log.err("unexpected {}", .{tag});
+                            unreachable;
+                        },
+                    }
+
+                    var iter: MessageIter = undefined;
+                    var array_iter: MessageIter = undefined;
+                    assert(reply.iterInit(&iter));
+                    if (iter.getArgType() != .array) {
+                        log.err("get args failed, expected array, got {}", .{iter.getArgType()});
+                        // TODO: error handling by user?
+                        return;
+                    }
+                    iter.recurse(&array_iter);
+                    if (array_iter.getArgType() != .dict_entry) {
+                        log.err("get args failed, expected dict_entry, got {}", .{iter.getArgType()});
+                        // TODO: error handling by user?
+                        return;
+                    }
+                    var properties: PropertiesType = undefined;
+                    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+                    defer _ = arena.reset(.free_all); // potentially make more efficient?
+                    for (0..iter.getElementCount()) |_| {
+                        var entry_iter: MessageIter = undefined;
+                        array_iter.recurse(&entry_iter);
+                        var property_name: [*:0]const u8 = undefined;
+                        entry_iter.getAnytype(arena.allocator(), &property_name) catch |err| {
+                            log.err("got error when parsing {?s}.{?s}: {}", .{ reply.getInterface(), reply.getMember(), err });
+                            return;
+                        };
+                        _ = entry_iter.next();
+
+                        var variant_iter: MessageIter = undefined;
+                        array_iter.recurse(&variant_iter);
+                        inline for (@typeInfo(PropertiesType).Struct.fields) |field| {
+                            if (std.mem.orderZ(u8, property_name, field.name) != .eq)
+                                variant_iter.getAnytype(arena.allocator(), &@field(properties, field.name)) catch |err| {
+                                    log.err("got error when parsing {?s}.{?s}: {}", .{ reply.getInterface(), reply.getMember(), err });
+                                    return;
+                                };
+                        }
+                        _ = array_iter.next();
+                    }
+                    callback(properties, @alignCast(@ptrCast(user_data)));
+                }
+            }._function;
+
+            const free_function = if (free_callback) |_free_callback| struct {
+                pub fn _function(user_data: *anyopaque) callconv(.C) void {
+                    _free_callback(@alignCast(@ptrCast(user_data)));
+                }
+            }._function else null;
+            if (!self.p.setNotify(function, @alignCast(@ptrCast(data)), free_function)) return error.OutOfMemory;
+        }
+        pub inline fn cancel(self: *Self) void {
+            self.p.cancel();
+        }
+        pub inline fn getCompleted(self: *Self) bool {
+            return self.p.getCompleted();
+        }
+        pub inline fn block(self: *Self) void {
+            self.p.block();
+        }
+    };
+}
+
 /// Not actually in spec but commonly used
 pub const VardictEntry = DictEntry([*:0]const u8, Arg);
 pub const Vardict = []const VardictEntry;
@@ -1859,7 +1948,7 @@ test "message arg adding and parsing" {
             .{ .key = "b", .value = .{ .string = "hello" } },
             .{ .key = "c", .value = .{ .boolean = true } },
         },
-        .d = &.{ true, false, false, true },
+        .d = &.{ true, false, false, true, true, false, false, true },
     };
     try message.appendArgsAnytype(args);
     try expectEqualArgs(args, try message.getArgsAnytype(TestArgs, allocator));
