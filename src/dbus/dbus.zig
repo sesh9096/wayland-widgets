@@ -1435,62 +1435,21 @@ pub const PendingCall = opaque {
     //  	Retrieves data previously set with dbus_pending_call_set_data().
 
 };
-/// get a typed wrapper around a libdbus PendingCall for a method call
-pub fn MethodPendingCall(ReplyArgsType: type) type {
+/// creates a function for a wrapper around a pending call
+pub fn PendingCallWrapper(
+    /// type we want the get
+    ReplyType: type,
+    /// transform a dbus Message into the first argument for a callback for setNotify
+    /// specified by calling the resulting function
+    messageToArg: fn (message: *Message, allocator: Allocator) TypeMismatchOrAllocatorError!ReplyType,
+) type {
     return struct {
         p: *PendingCall,
         const Self = @This();
         pub fn setNotify(
             self: Self,
             data: anytype,
-            callback: fn (ReplyArgsType, @TypeOf(data)) void,
-            free_callback: ?fn (@TypeOf(data)) void,
-        ) Allocator.Error!void {
-            const function = struct {
-                pub fn _function(pending: *PendingCall, user_data: *anyopaque) callconv(.C) void {
-                    assert(pending.getCompleted());
-                    const reply = pending.stealReply().?;
-                    defer reply.unref();
-                    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-                    defer _ = arena.reset(.free_all); // potentially make more efficient?
-
-                    // argument list
-                    const args = reply.getArgsAnytype(fnParams(callback)[0].type.?, arena.allocator()) catch |err| {
-                        log.err("got error when parsing {?s}.{?s}: {}", .{ reply.getInterface(), reply.getMember(), err });
-                        return;
-                    };
-                    // grab arguemnts
-                    callback(args, @alignCast(@ptrCast(user_data)));
-                }
-            }._function;
-
-            const free_function = if (free_callback) |_free_callback| struct {
-                pub fn _function(user_data: *anyopaque) callconv(.C) void {
-                    _free_callback(@alignCast(@ptrCast(user_data)));
-                }
-            }._function else null;
-            if (!self.p.setNotify(function, @alignCast(@ptrCast(data)), free_function)) return error.OutOfMemory;
-        }
-        pub inline fn cancel(self: *Self) void {
-            self.p.cancel();
-        }
-        pub inline fn getCompleted(self: *Self) bool {
-            return self.p.getCompleted();
-        }
-        pub inline fn block(self: *Self) void {
-            self.p.block();
-        }
-    };
-}
-/// get a typed wrapper around a libdbus PendingCall for a call to the 'Get' method
-pub fn GetPropertyPendingCall(PropertyType: type) type {
-    return struct {
-        p: *PendingCall,
-        const Self = @This();
-        pub fn setNotify(
-            self: Self,
-            data: anytype,
-            callback: fn (PropertyType, @TypeOf(data)) void,
+            callback: fn (ReplyType, @TypeOf(data)) void,
             free_callback: ?fn (@TypeOf(data)) void,
         ) Allocator.Error!void {
             const function = struct {
@@ -1509,24 +1468,14 @@ pub fn GetPropertyPendingCall(PropertyType: type) type {
                             unreachable;
                         },
                     }
-
-                    var iter: MessageIter = undefined;
-                    var sub_iter: MessageIter = undefined;
-                    assert(reply.iterInit(&iter));
-                    if (iter.getArgType() != .variant) {
-                        log.err("get args failed, expected variant, got {}", .{iter.getArgType()});
-                        // TODO: error handling by user?
-                        return;
-                    }
-                    iter.recurse(&sub_iter);
-                    var property: PropertyType = undefined;
                     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
                     defer _ = arena.reset(.free_all); // potentially make more efficient?
-                    sub_iter.getAnytype(arena.allocator(), &property) catch |err| {
-                        log.err("got error when parsing {?s}.{?s}: {}", .{ reply.getInterface(), reply.getMember(), err });
+                    // transform into reply type
+                    const arg: ReplyType = messageToArg(reply, arena.allocator()) catch |err| {
+                        log.err("got error when parsing return args for {?s}.{?s}: {}", .{ reply.getInterface(), reply.getMember(), err });
                         return;
                     };
-                    callback(property, @alignCast(@ptrCast(user_data)));
+                    callback(arg, @alignCast(@ptrCast(user_data)));
                 }
             }._function;
 
@@ -1537,105 +1486,88 @@ pub fn GetPropertyPendingCall(PropertyType: type) type {
             }._function else null;
             if (!self.p.setNotify(function, @alignCast(@ptrCast(data)), free_function)) return error.OutOfMemory;
         }
-        pub inline fn cancel(self: *Self) void {
+        pub inline fn cancel(self: Self) void {
             self.p.cancel();
         }
-        pub inline fn getCompleted(self: *Self) bool {
+        pub inline fn getCompleted(self: Self) bool {
             return self.p.getCompleted();
         }
-        pub inline fn block(self: *Self) void {
+        pub inline fn block(self: Self) void {
             self.p.block();
         }
+        pub fn awaitReply(self: Self, allocator: Allocator) TypeMismatchOrAllocatorError!ReplyType {
+            self.p.block();
+            const reply = self.p.stealReply().?;
+            defer reply.unref();
+            return messageToArg(reply, allocator);
+        }
     };
+}
+/// get a typed wrapper around a libdbus PendingCall for a method call
+pub fn MethodPendingCall(ReplyArgsType: type) type {
+    return PendingCallWrapper(
+        ReplyArgsType,
+        struct {
+            pub fn returnArgsFromMessage(message: *Message, allocator: Allocator) TypeMismatchOrAllocatorError!ReplyArgsType {
+                return message.getArgsAnytype(ReplyArgsType, allocator);
+            }
+        }.returnArgsFromMessage,
+    );
+}
+/// get a typed wrapper around a libdbus PendingCall for a call to the 'Get' method
+pub fn GetPropertyPendingCall(PropertyType: type) type {
+    return PendingCallWrapper(
+        PropertyType,
+        struct {
+            pub fn propertyFromMessaage(message: *Message, allocator: Allocator) TypeMismatchOrAllocatorError!PropertyType {
+                var iter: MessageIter = undefined;
+                var sub_iter: MessageIter = undefined;
+                assert(message.iterInit(&iter));
+                if (iter.getArgType() != .variant) {
+                    return error.TypeMismatch;
+                }
+                iter.recurse(&sub_iter);
+                var property: PropertyType = undefined;
+                try sub_iter.getAnytype(allocator, &property);
+                return property;
+            }
+        }.propertyFromMessaage,
+    );
 }
 
 /// get a typed wrapper around a libdbus PendingCall for a call to the 'GetAll' method
 pub fn GetAllPendingCall(PropertiesType: type) type {
-    return struct {
-        p: *PendingCall,
-        const Self = @This();
-        pub fn setNotify(
-            self: Self,
-            data: anytype,
-            callback: fn (PropertiesType, @TypeOf(data)) void,
-            free_callback: ?fn (@TypeOf(data)) void,
-        ) Allocator.Error!void {
-            const function = struct {
-                pub fn _function(pending: *PendingCall, user_data: *anyopaque) callconv(.C) void {
-                    assert(pending.getCompleted());
-                    const reply = pending.stealReply().?;
-                    defer reply.unref();
-                    switch (reply.getType()) {
-                        .method_return => {},
-                        .@"error" => {
-                            log.err("got error {?s}:{s}", .{ reply.getErrorName(), (reply.getArgsAnytype(struct { [*:0]const u8 }, std.testing.failing_allocator) catch unreachable)[0] });
-                            return;
-                        },
-                        else => |tag| {
-                            log.err("unexpected {}", .{tag});
-                            unreachable;
-                        },
-                    }
+    return PendingCallWrapper(PropertiesType, struct {
+        pub fn propertiesFromMessaage(message: *Message, allocator: Allocator) TypeMismatchOrAllocatorError!PropertiesType {
+            var iter: MessageIter = undefined;
+            var array_iter: MessageIter = undefined;
+            assert(message.iterInit(&iter));
+            if (iter.getArgType() != .array) return error.TypeMismatch;
+            iter.recurse(&array_iter);
+            if (array_iter.getArgType() != .dict_entry) return error.TypeMismatch;
+            var properties: PropertiesType = undefined;
+            for (0..@intCast(iter.getElementCount())) |_| {
+                var entry_iter: MessageIter = undefined;
+                array_iter.recurse(&entry_iter);
+                var property_name: [*:0]const u8 = undefined;
+                try entry_iter.getAnytype(allocator, &property_name);
+                _ = entry_iter.next();
 
-                    var iter: MessageIter = undefined;
-                    var array_iter: MessageIter = undefined;
-                    assert(reply.iterInit(&iter));
-                    if (iter.getArgType() != .array) {
-                        log.err("get args failed, expected array, got {}", .{iter.getArgType()});
-                        // TODO: error handling by user?
-                        return;
-                    }
-                    iter.recurse(&array_iter);
-                    if (array_iter.getArgType() != .dict_entry) {
-                        log.err("get args failed, expected dict_entry, got {}", .{iter.getArgType()});
-                        // TODO: error handling by user?
-                        return;
-                    }
-                    var properties: PropertiesType = undefined;
-                    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-                    defer _ = arena.reset(.free_all); // potentially make more efficient?
-                    for (0..iter.getElementCount()) |_| {
-                        var entry_iter: MessageIter = undefined;
-                        array_iter.recurse(&entry_iter);
-                        var property_name: [*:0]const u8 = undefined;
-                        entry_iter.getAnytype(arena.allocator(), &property_name) catch |err| {
-                            log.err("got error when parsing {?s}.{?s}: {}", .{ reply.getInterface(), reply.getMember(), err });
-                            return;
-                        };
-                        _ = entry_iter.next();
-
-                        var variant_iter: MessageIter = undefined;
-                        array_iter.recurse(&variant_iter);
-                        inline for (@typeInfo(PropertiesType).Struct.fields) |field| {
-                            if (std.mem.orderZ(u8, property_name, field.name) != .eq)
-                                variant_iter.getAnytype(arena.allocator(), &@field(properties, field.name)) catch |err| {
-                                    log.err("got error when parsing {?s}.{?s}: {}", .{ reply.getInterface(), reply.getMember(), err });
-                                    return;
-                                };
+                {
+                    if (entry_iter.getArgType() != .variant) return error.TypeMismatch;
+                    var variant_iter: MessageIter = undefined;
+                    entry_iter.recurse(&variant_iter);
+                    inline for (@typeInfo(PropertiesType).Struct.fields) |field| {
+                        if (std.mem.orderZ(u8, property_name, field.name) == .eq) {
+                            try variant_iter.getAnytype(allocator, &@field(properties, field.name));
                         }
-                        _ = array_iter.next();
                     }
-                    callback(properties, @alignCast(@ptrCast(user_data)));
                 }
-            }._function;
-
-            const free_function = if (free_callback) |_free_callback| struct {
-                pub fn _function(user_data: *anyopaque) callconv(.C) void {
-                    _free_callback(@alignCast(@ptrCast(user_data)));
-                }
-            }._function else null;
-            if (!self.p.setNotify(function, @alignCast(@ptrCast(data)), free_function)) return error.OutOfMemory;
+                _ = array_iter.next();
+            }
+            return properties;
         }
-        pub inline fn cancel(self: *Self) void {
-            self.p.cancel();
-        }
-        pub inline fn getCompleted(self: *Self) bool {
-            return self.p.getCompleted();
-        }
-        pub inline fn block(self: *Self) void {
-            self.p.block();
-        }
-    };
+    }.propertiesFromMessaage);
 }
 
 /// Not actually in spec but commonly used
@@ -1930,8 +1862,8 @@ test {
 
 test "message arg adding and parsing" {
     var arena_allocator = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    const allocator = arena_allocator.allocator();
     defer _ = arena_allocator.reset(.free_all); // potentially make more efficient?
+    const allocator = arena_allocator.allocator();
     const message = Message.new(.method_call);
     defer message.unref();
     const TestArgs = struct {
