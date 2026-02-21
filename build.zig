@@ -108,7 +108,9 @@ pub fn build(b: *std.Build) void {
     dbus_tests.linkLibC();
     const run_dbus_tests = b.addRunArtifact(dbus_tests);
 
-    const test_step = b.step("test", "Run tests");
+    const dbus_test_step = b.step("dbus_test", "Run dbus tests");
+    dbus_test_step.dependOn(&run_dbus_tests.step);
+    const test_step = b.step("test", "Run all tests");
     test_step.dependOn(&run_unit_tests.step);
     test_step.dependOn(&run_dbus_tests.step);
 }

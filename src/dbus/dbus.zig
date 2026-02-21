@@ -954,6 +954,55 @@ pub inline fn typeMismatchErrorString(expected_type: type) [:0]const u8 {
     }
     return "Nonconvertible type " ++ @typeName(expected_type);
 }
+/// use on anything returned with Message.getArgsAnytype or MessageIter.getAnytype
+pub fn freeArgs(args: anytype, allocator: Allocator) void {
+    switch (@typeInfo(@TypeOf(args))) {
+        .Pointer => |info| {
+            switch (info.size) {
+                .One => {
+                    freeArgs(args.*, allocator);
+                    allocator.destroy(args);
+                },
+                .Slice => {
+                    if (info.sentinel) |sentinel| {
+                        // Dbus String
+                        if (info.child == u8 and @as(*const u8, @ptrCast(sentinel)).* == 0) {
+                            return;
+                        } else @compileError("Cannot convert type " ++ @typeName(@TypeOf(args)) ++ " to dbus type");
+                    }
+                    if (ArgType.fromType(info.child)) |arg_type| {
+                        if (arg_type.isFixedArrayElement()) {
+                            return;
+                        }
+                    }
+                    for (args) |elem| {
+                        freeArgs(elem, allocator);
+                    }
+                    allocator.free(args);
+                },
+                else => {},
+            }
+        },
+        .Array => {
+            for (args) |elem| {
+                freeArgs(elem, allocator);
+            }
+        },
+        .Struct => |info| {
+            inline for (info.fields) |field| {
+                freeArgs(@field(args, field.name), allocator);
+            }
+        },
+        .Union => |info| {
+            if (info.tag_type != null) {
+                switch (args) {
+                    inline else => |_, tag| freeArgs(@field(args, @tagName(tag)), allocator),
+                }
+            }
+        },
+        else => {},
+    }
+}
 
 pub const TypeMismatchError = error{TypeMismatch};
 pub const TypeMismatchOrAllocatorError = (Allocator.Error || TypeMismatchError);
@@ -2070,9 +2119,7 @@ test {
 
 // pub fn testArgs() !void {
 test "message arg adding and parsing" {
-    var arena_allocator = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer _ = arena_allocator.reset(.free_all); // potentially make more efficient?
-    const allocator = arena_allocator.allocator();
+    const allocator = std.testing.allocator;
     const message = Message.newMethodCall("org.destination", "/path", "org.interface", "method").?;
     message.setSerial(69);
     defer message.unref();
@@ -2110,4 +2157,5 @@ test "message arg adding and parsing" {
     // unreachable;
     errdefer log.err("expected:({}), actual:({})", .{ argStructPrinter(args), argStructPrinter(returned_args) });
     try expectEqualArgs(args, returned_args);
+    freeArgs(returned_args, allocator);
 }
