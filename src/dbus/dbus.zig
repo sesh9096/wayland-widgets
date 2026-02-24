@@ -581,6 +581,9 @@ pub const MessageIter = extern struct {
                             log.err("TODO", .{});
                             unreachable;
                         },
+                        // .array => {
+                        //     try sub_iter.appendAnytype(variant.array);
+                        // }
                         inline else => |field| {
                             try sub_iter.appendAnytype(field);
                             // if (!sub_iter.appendBasic(tag, @ptrCast(field_ptr))) return error.OutOfMemory;
@@ -595,24 +598,24 @@ pub const MessageIter = extern struct {
                         .dict_entry => |dictionary| {
                             var sig_buf = std.BoundedArray(u8, 4096){};
                             array.writeElementSignature(sig_buf.writer()) catch unreachable;
-                            var sub_iter: MessageIter = undefined;
-                            if (!iter.openContainer(.array, @ptrCast(sig_buf.constSlice()), &sub_iter)) return error.OutOfMemory;
-                            switch (dictionary.keys) {
-                                .invalid, .dict_entry => unreachable,
-                                inline else => |_, key_type| {
-                                    // lots of codegen
-                                    switch (dictionary.values) {
-                                        .invalid, .dict_entry => unreachable,
-                                        inline else => |_, value_type| {
-                                            var dict_iter = dictionary.iter(key_type, value_type);
-                                            while (dict_iter.next()) |entry| {
-                                                try sub_iter.appendAnytype(entry);
-                                            }
-                                        },
-                                    }
-                                },
+                            var array_iter: MessageIter = undefined;
+                            if (!iter.openContainer(.array, @ptrCast(sig_buf.constSlice()), &array_iter)) return error.OutOfMemory;
+                            for (dictionary.items) |entry| {
+                                var entry_iter: MessageIter = undefined;
+                                if (!array_iter.openContainer(.dict_entry, null, &entry_iter)) return error.OutOfMemory;
+                                if (dictionary.key_type == .variant) {
+                                    try entry_iter.appendAnytype(entry[0]);
+                                } else {
+                                    try entry_iter.appendNonVariant(entry[0]);
+                                }
+                                if (dictionary.value_type == .variant) {
+                                    try entry_iter.appendAnytype(entry[1]);
+                                } else {
+                                    try entry_iter.appendNonVariant(entry[1]);
+                                }
+                                if (!array_iter.closeContainer(&entry_iter)) return error.OutOfMemory;
                             }
-                            if (!iter.closeContainer(&sub_iter)) return error.OutOfMemory;
+                            if (!iter.closeContainer(&array_iter)) return error.OutOfMemory;
                         },
                         .array => unreachable,
                         .@"struct" => |struct_slice| {
@@ -670,7 +673,7 @@ pub const MessageIter = extern struct {
     pub fn getAnytype(iter: *MessageIter, allocator: Allocator, dst: anytype) TypeMismatchOrAllocatorError!void {
         if (@typeInfo(@TypeOf(dst)) != .Pointer or
             @typeInfo(@TypeOf(dst)).Pointer.is_const != false or
-            @typeInfo(@TypeOf(dst)).Pointer.size != .One) @compileError("getAnytype called with invalid type" ++ @typeName(@TypeOf(dst)));
+            @typeInfo(@TypeOf(dst)).Pointer.size != .One) @compileError("getAnytype called with invalid type " ++ @typeName(@TypeOf(dst)));
         const ChildType = @typeInfo(@TypeOf(dst)).Pointer.child;
         const arg_type = iter.getArgType();
 
@@ -818,12 +821,14 @@ pub const MessageIter = extern struct {
                             sub_iter.getBasic(@ptrCast(&dst.unix_fd.fd));
                         },
                         .array => {
-                            dst.* = .{ .array = undefined };
-                            try sub_iter.getAnytype(allocator, &dst.array);
+                            const array = try allocator.create(Arg.Array);
+                            try sub_iter.getAnytype(allocator, array);
+                            dst.* = .{ .array = array };
                         },
                         .variant => {
-                            dst.* = .{ .variant = try allocator.create(Arg) };
-                            try sub_iter.getAnytype(allocator, dst.variant);
+                            const variant = try allocator.create(Arg);
+                            try sub_iter.getAnytype(allocator, variant);
+                            dst.* = .{ .variant = variant };
                         },
                         .@"struct" => {
                             dst.* = .{ .@"struct" = try iter.getVariantList(allocator) };
@@ -853,48 +858,51 @@ pub const MessageIter = extern struct {
                         .dict_entry => {
                             var array_iter: MessageIter = undefined;
                             iter.recurse(&array_iter);
-                            var key_arg_type = ArgType.invalid;
-                            var value_arg_type = ArgType.invalid;
-                            if (array_iter.hasNext()) {
+                            var key_type = Arg.invalid;
+                            var value_type = Arg.invalid;
+                            {
+                                if (array_iter.getArgType() != .dict_entry) {
+                                    const dictionary = try allocator.create(Arg.Dictionary);
+                                    dictionary.* = .{
+                                        .key_type = key_type,
+                                        .value_type = value_type,
+                                        .items = &.{},
+                                    };
+                                    dst.* = .{ .dict_entry = dictionary };
+                                    return;
+                                }
                                 var entry_iter: MessageIter = undefined;
                                 array_iter.recurse(&entry_iter);
-                                key_arg_type = entry_iter.getArgType();
+                                key_type = entry_iter.getArgType();
                                 assert(entry_iter.next());
-                                value_arg_type = entry_iter.getArgType();
+                                value_type = entry_iter.getArgType();
                             }
-
-                            switch (key_arg_type) {
-                                .invalid, .dict_entry => unreachable,
-                                inline else => |key_type| {
-                                    // lots of codegen
-                                    switch (value_arg_type) {
-                                        .invalid, .dict_entry => unreachable,
-                                        inline else => |value_type| {
-                                            @setEvalBranchQuota(2500);
-                                            var keys = std.ArrayList(@typeInfo(fieldType(Arg.Array, @tagName(key_type))).Pointer.child).init(allocator);
-                                            errdefer keys.deinit();
-                                            var values = std.ArrayList(@typeInfo(fieldType(Arg.Array, @tagName(value_type))).Pointer.child).init(allocator);
-                                            errdefer values.deinit();
-
-                                            while (true) {
-                                                assert(array_iter.getArgType() == .dict_entry);
-                                                var entry_iter: MessageIter = undefined;
-                                                array_iter.recurse(&entry_iter);
-                                                try entry_iter.getAnytype(allocator, try keys.addOne());
-                                                assert(entry_iter.next());
-                                                try entry_iter.getAnytype(allocator, try values.addOne());
-                                                if (!array_iter.next()) break;
-                                            }
-                                            const dictionary = try allocator.create(Arg.Dictionary);
-                                            dictionary.* = Arg.Dictionary{
-                                                .keys = @unionInit(Arg.Array, @tagName(key_type), try keys.toOwnedSlice()),
-                                                .values = @unionInit(Arg.Array, @tagName(value_type), try values.toOwnedSlice()),
-                                            };
-                                            dst.* = .{ .dict_entry = dictionary };
-                                        },
-                                    }
-                                },
+                            var items = std.ArrayList([2]Arg).init(allocator);
+                            while (true) {
+                                assert(array_iter.getArgType() == .dict_entry);
+                                const entry = try items.addOne();
+                                var entry_iter: MessageIter = undefined;
+                                array_iter.recurse(&entry_iter);
+                                if (key_type == .variant) {
+                                    try entry_iter.getAnytype(allocator, &entry[0]);
+                                } else {
+                                    try entry_iter.getNonVariant(allocator, &entry[0]);
+                                }
+                                assert(entry_iter.next());
+                                if (value_type == .variant) {
+                                    try entry_iter.getAnytype(allocator, &entry[1]);
+                                } else {
+                                    try entry_iter.getNonVariant(allocator, &entry[1]);
+                                }
+                                if (!array_iter.next()) break;
                             }
+                            const dictionary = try allocator.create(Arg.Dictionary);
+                            dictionary.* = .{
+                                .key_type = key_type,
+                                .value_type = value_type,
+                                .items = try items.toOwnedSlice(),
+                            };
+                            dst.* = .{ .dict_entry = dictionary };
                         },
                         inline else => |tag| {
                             dst.* = @unionInit(Arg.Array, @tagName(tag), undefined);
@@ -914,10 +922,16 @@ pub const MessageIter = extern struct {
     pub fn getNonVariant(iter: *MessageIter, allocator: Allocator, dst: *Arg) TypeMismatchOrAllocatorError!void {
         switch (iter.getArgType()) {
             .invalid, .dict_entry => unreachable,
+            .array => {
+                const array = try allocator.create(Arg.Array);
+                try iter.getAnytype(allocator, array);
+                dst.* = .{ .array = array };
+            },
             .variant => {
                 // why does dbus allow variants inside variants?
-                dst.* = .{ .variant = try allocator.create(Arg) };
-                try iter.getAnytype(allocator, dst.variant);
+                const variant = try allocator.create(Arg);
+                try iter.getAnytype(allocator, variant);
+                dst.* = .{ .variant = variant };
             },
             inline else => |tag| {
                 dst.* = @unionInit(Arg, @tagName(tag), undefined);
@@ -1309,7 +1323,7 @@ pub export fn printFilter(connection: *Connection, message: *Message, user_data:
 pub inline fn getSignature(T: type) [:0]const u8 {
     comptime {
         const buf = getSignatureNoSentinel(T);
-        return @ptrCast((buf ++ [_]u8{0})[0..buf.len]);
+        return (buf ++ [_]u8{0})[0..buf.len :0];
     }
 }
 pub inline fn getSignatureNoSentinel(T: type) []const u8 {
@@ -1426,15 +1440,6 @@ pub const ArgType = enum(c_int) {
     }
     /// return the appropriate dbus arg type corresponding to a type
     pub inline fn fromType(T: type) ?ArgType {
-        // comptime for (std.meta.fields(Arg)) |union_field| {
-        //     if (T == union_field.type) {
-        //         return std.meta.stringToEnum(ArgType, union_field.name);
-        //     }
-        // } else if (@hasField(T, "key") and @hasField(T, "value")) {
-        //     return .dict_entry;
-        // } else if (@typeInfo(T) == .Pointer and @typeInfo(T).Pointer.size == .Slice) return .array;
-        // return null;
-
         return switch (@typeInfo(T)) {
             .Bool => .boolean,
             .Int => |int| switch (int.bits) {
@@ -1454,7 +1459,7 @@ pub const ArgType = enum(c_int) {
                 else => null,
             },
             .Float => |float| if (float.bits == 64) .double else null,
-            .Array => |array| if (array.sentinel) "s" else "a" ++ getSignature(array.child),
+            .Array => |array| if (array.sentinel != null) .string else .array,
             .Pointer => |pointer| if (pointer.sentinel) |sentinel|
                 if (pointer.child == u8 and @as(*const u8, @ptrCast(sentinel)).* == 0)
                     .string
@@ -1471,8 +1476,7 @@ pub const ArgType = enum(c_int) {
                 .signature
             else {
                 // TODO: other dictionary types?
-                const fields = std.meta.fields(T);
-                if (@hasField(T, "key") and @hasField(T, "value") and fields.len == 2) {
+                if (isDictEntry(T)) {
                     return .dict_entry;
                 } else {
                     return .@"struct";
@@ -1504,8 +1508,8 @@ pub const Arg = union(ArgType) {
     object_path: ObjectPath,
     signature: Signature,
     unix_fd: UnixFd,
-    array: Array,
-    variant: *Arg,
+    array: *const Array,
+    variant: *const Arg,
     @"struct": []const Arg,
     dict_entry: void,
     pub const ObjectPath = struct { path: [*:0]const u8 };
@@ -1547,8 +1551,8 @@ pub const Arg = union(ArgType) {
             switch (self) {
                 .dict_entry => |dictionary| {
                     try writer.writeByte('{');
-                    try dictionary.keys.writeInnerSignature(writer);
-                    try dictionary.values.writeInnerSignature(writer);
+                    try writer.writeByte(@intCast(@intFromEnum(dictionary.key_type)));
+                    try writer.writeByte(@intCast(@intFromEnum(dictionary.value_type)));
                     try writer.writeByte('}');
                 },
                 .@"struct" => |struct_info| {
@@ -1567,28 +1571,34 @@ pub const Arg = union(ArgType) {
         }
     };
     pub const Dictionary = struct {
-        keys: Array,
-        values: Array,
+        key_type: ArgType = .invalid,
+        value_type: ArgType = .invalid,
+        items: []const [2]Arg,
+        // keys: Array,
+        // values: Array,
         pub fn Iter(comptime key_type: ArgType, comptime value_type: ArgType) type {
             return struct {
                 dictionary: Dictionary,
                 i: usize = 0,
                 pub const Self = @This();
                 pub fn next(self: *Self) ?DictEntry(
-                    @typeInfo(fieldType(Array, @tagName(key_type))).Pointer.child,
-                    @typeInfo(fieldType(Array, @tagName(value_type))).Pointer.child,
+                    if (key_type == .variant) Arg else fieldType(Arg, @tagName(key_type)),
+                    if (value_type == .variant) Arg else fieldType(Arg, @tagName(value_type)),
                 ) {
-                    if (self.i >= @field(self.dictionary.keys, @tagName(key_type)).len) return null;
-                    defer self.i += 1;
+                    const items = self.dictionary.items;
+                    const i = self.i;
+                    if (i >= items.len) return null;
+                    self.i += 1;
                     return .{
-                        .key = @field(self.dictionary.keys, @tagName(key_type))[self.i],
-                        .value = @field(self.dictionary.values, @tagName(value_type))[self.i],
+                        .key = if (key_type == .variant) items[i][0] else @field(items[i][0], @tagName(key_type)),
+                        .value = if (value_type == .variant) items[i][1] else @field(items[i][1], @tagName(value_type)),
                     };
                 }
             };
         }
         pub fn iter(self: Dictionary, comptime key_type: ArgType, comptime value_type: ArgType) Iter(key_type, value_type) {
-            assert(@field(self.keys, @tagName(key_type)).len == @field(self.values, @tagName(value_type)).len);
+            assert(self.key_type == key_type or self.key_type == .invalid);
+            assert(self.value_type == value_type or self.value_type == .invalid);
             return Iter(key_type, value_type){ .dictionary = self };
         }
     };
@@ -2117,8 +2127,20 @@ test {
     _ = introspection;
 }
 
-// pub fn testArgs() !void {
-test "message arg adding and parsing" {
+// test serializing and deserializing args
+pub fn testArgs(args: anytype) !void {
+    const T = @TypeOf(args);
+    const allocator = std.testing.allocator;
+    const message = Message.newMethodCall("org.destination", "/path", "org.interface", "method").?;
+    message.setSerial(69);
+    defer message.unref();
+    try message.appendArgsAnytype(args);
+    const returned_args = try message.getArgsAnytype(T, allocator);
+    errdefer log.err("expected:({}), actual:({})", .{ argStructPrinter(args), argStructPrinter(returned_args) });
+    try expectEqualArgs(args, returned_args);
+    freeArgs(returned_args, allocator);
+}
+test "message arg adding, marshal, demarshal, and parsing" {
     const allocator = std.testing.allocator;
     const message = Message.newMethodCall("org.destination", "/path", "org.interface", "method").?;
     message.setSerial(69);
@@ -2137,16 +2159,17 @@ test "message arg adding and parsing" {
             .{ .key = "a", .value = .{ .int32 = 8 } },
             .{ .key = "b", .value = .{ .string = "hello" } },
             .{ .key = "c", .value = .{ .boolean = true } },
-            .{ .key = "d", .value = .{ .array = .{ .dict_entry = &Arg.Dictionary{
-                .keys = .{ .string = &.{ "x", "y", "z" } },
-                .values = .{ .variant = &.{
-                    .{ .string = "value1" },
-                    .{ .int32 = -32 },
-                    .{ .object_path = .{ .path = "/org/bar/baz" } },
-                } },
+            .{ .key = "d", .value = .{ .array = &.{ .dict_entry = &Arg.Dictionary{
+                .key_type = .string,
+                .value_type = .variant,
+                .items = &.{
+                    .{ .{ .string = "x" }, .{ .string = "value1" } },
+                    .{ .{ .string = "y" }, .{ .int32 = -32 } },
+                    .{ .{ .string = "z" }, .{ .object_path = .{ .path = "/org/bar/baz" } } },
+                },
             } } } },
             .{ .key = "e", .value = .{ .byte = 0 } },
-            .{ .key = "f", .value = .{ .array = .{ .int32 = &.{ 1, 2, 3 } } } },
+            .{ .key = "f", .value = .{ .array = &.{ .int32 = &.{ 1, 2, 3 } } } },
         },
         .d = &.{ true, false, false, true, true, false, false, true },
         .e = &.{ 1, 2, 3, 4, 5, 6, 7, 8 },
@@ -2154,8 +2177,38 @@ test "message arg adding and parsing" {
     try message.appendArgsAnytype(args);
     const marshalled = try message.marshalSlice();
     const returned_args = try (try Message.demarshalSlice(marshalled)).getArgsAnytype(TestArgs, allocator);
-    // unreachable;
     errdefer log.err("expected:({}), actual:({})", .{ argStructPrinter(args), argStructPrinter(returned_args) });
     try expectEqualArgs(args, returned_args);
     freeArgs(returned_args, allocator);
+}
+
+test "empty arrays" {
+    const Arrays = struct {
+        b: []const bool = &.{},
+        i: []const i32 = &.{},
+        s: []const [*:0]const u8 = &.{},
+        d: []const Vardict = &.{},
+        v: []const Arg = &.{},
+        arg_arrays: []const Arg = &.{
+            .{ .array = &.{ .boolean = &.{} } },
+            .{ .array = &.{ .int32 = &.{} } },
+            .{ .array = &.{ .string = &.{} } },
+        },
+    };
+    try testArgs(Arrays{});
+}
+
+test "dictionary iterators" {
+    const dict = Arg.Dictionary{ .key_type = .string, .value_type = .variant, .items = &.{
+        .{ .{ .string = "foo" }, .{ .int32 = 42 } },
+        .{ .{ .string = "bar" }, .{ .string = "baz" } },
+    } };
+    var iter = dict.iter(.string, .variant);
+    const entry1 = iter.next().?;
+    try testing.expectEqual(entry1.key, dict.items[0][0].string);
+    try testing.expectEqual(entry1.value, dict.items[0][1]);
+    const entry2 = iter.next().?;
+    try testing.expectEqual(entry2.key, dict.items[1][0].string);
+    try testing.expectEqual(entry2.value, dict.items[1][1]);
+    try testing.expectEqual(iter.next(), null);
 }
