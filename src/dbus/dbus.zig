@@ -1844,6 +1844,31 @@ pub fn generateSignalFunction(ObjectType: type, InterfaceType: type, signal_name
     }._signal;
 }
 
+const PropertiesChangedArgs = struct {
+    changed_properties: Vardict,
+    invalidated_properties: []const [*:0]const u8,
+};
+/// create a function which when called sends a dbus PropertiesChanged signal.
+/// - ObjectType must have a field `connection` of type `Connection` to send the signal.
+/// - InterfaceType must be an interface named field_name, see `Connection.registerObject` for details.
+pub fn generatePropertiesChangedFunction(
+    ObjectType: type,
+    comptime field_name: [:0]const u8,
+) fn (self: *const fieldType(ObjectType, field_name), args: PropertiesChangedArgs) Allocator.Error!void {
+    const InterfaceType = fieldType(ObjectType, field_name);
+    return struct {
+        pub fn _signal(self: *const InterfaceType, args: PropertiesChangedArgs) !void {
+            const object: *const ObjectType = @fieldParentPtr(field_name, self);
+            const message = Message.newSignal(ObjectType.path, "org.freedesktop.DBus.Properties", "PropertiesChanged") orelse return error.OutOfMemory;
+            try message.appendArgsAnytype(struct { InterfaceType.interface });
+            try message.appendArgsAnytype(args);
+            const connection = object.connection;
+            // a signal's id is irrelevant
+            _ = connection.send(message, null);
+        }
+    }._signal;
+}
+
 pub const Element = enum { invalid, method, signal, getProperty, setProperty };
 pub fn splitName(name: [:0]const u8) struct { Element, [:0]const u8 } {
     inline for (@typeInfo(Element).Enum.fields) |field| {
@@ -1859,6 +1884,7 @@ pub fn fieldType(T: type, comptime field_name: [:0]const u8) type {
         for (std.meta.fields(T)) |field| {
             if (std.mem.eql(u8, field.name, field_name)) return field.type;
         }
+        @compileError(@typeName(T) ++ " does not have field " ++ field_name);
     }
 }
 pub inline fn isInterface(T: type) bool {

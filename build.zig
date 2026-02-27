@@ -39,6 +39,8 @@ pub fn build(b: *std.Build) void {
         .target = b.host,
         .optimize = optimize,
     });
+    const install_dbus_codegen_step = b.step("install_dbus_codegen", "install the dbus codegen tool");
+    install_dbus_codegen_step.dependOn(&b.addInstallArtifact(dbus_codegen, .{}).step);
 
     const exe = b.addExecutable(.{
         .name = "wayland-utility",

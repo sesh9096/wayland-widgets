@@ -42,7 +42,11 @@ pub fn main() !void {
         const buf = try input_file.readToEndAlloc(allocator, 0x1000000);
         defer allocator.free(buf);
         const node = try introspection.parse(buf, true, allocator);
-        try writeProxy(node, output);
+        if (options.server) {
+            try writeExampleServer(node, output);
+        } else {
+            try writeProxy(node, output);
+        }
     }
     // log.debug("{}", .{node});
     if (options.root) |root_filename| {
@@ -180,7 +184,93 @@ pub fn writeProxy(node: introspection.Node, output: anytype) !void {
             \\    pub fn getAll(self: *{s}) !dbus.GetAllPendingCall(Properties) {{
             \\        return getAllGeneric(self, "{s}", Properties);
             \\    }}
+            \\
         , .{ interface_type_name, interface_field_name });
+
+        try output.writeAll("};\n");
+    }
+}
+pub fn writeExampleServer(node: introspection.Node, output: anytype) !void {
+    try output.print(
+        \\const dbus = @import("dbus");
+        \\const Self = @This();
+        \\pub const path = "{s}";
+        \\connection: *dbus.Connection = undefined,
+        \\
+    , .{node.name});
+
+    // interface fields
+    for (node.interfaces) |interface| {
+        var field_name_buf: [300]u8 = undefined;
+        const interface_field_name = interfaceFieldName(interface.name, &field_name_buf);
+        var type_name_buf: [300]u8 = undefined;
+        const interface_type_name = interfaceTypeName(interface_field_name, &type_name_buf);
+        try output.print("{s}: {s} = .{{}},\n", .{ interface_field_name, interface_type_name });
+    }
+    // interface field types
+    for (node.interfaces) |interface| {
+        // var field_name_buf: [300]u8 = undefined;
+        var field_name_buf: [300]u8 = undefined;
+        const interface_field_name = interfaceFieldName(interface.name, &field_name_buf);
+        var type_name_buf: [300]u8 = undefined;
+        const interface_type_name = interfaceTypeName(interface_field_name, &type_name_buf);
+
+        try output.print("pub const {s} = struct {{\n", .{interface_type_name});
+        try output.print("    pub const interface = \"{s}\";\n", .{interface.name});
+
+        for (interface.methods) |method| {
+            try output.print(
+                \\    pub fn method{s}(self: *{s}, args: {0s}Args) {0s}ReturnArgs {{}}
+                \\
+            , .{ method.name, interface_type_name });
+            try output.print("    pub const {s}Args = struct {{\n", .{method.name});
+            for (method.args, 0..) |arg, i| {
+                if (arg.direction == .in) {
+                    try output.writeAll("        ");
+                    try printArg(output, arg, i);
+                    try output.writeAll(",\n");
+                }
+            }
+            try output.writeAll("    };\n");
+            try output.print("    pub const {s}ReturnArgs = struct {{\n", .{method.name});
+            for (method.args, 0..) |arg, i| {
+                if (arg.direction == .out) {
+                    try output.writeAll("        ");
+                    try printArg(output, arg, i);
+                    try output.writeAll(",\n");
+                }
+            }
+            try output.writeAll("    };\n");
+        }
+
+        for (interface.signals) |signal| {
+            try output.print("    pub const signal{s} = dbus.generateSignalFunction(Self, {s}, {0s}, {0s}Args);\n", .{ signal.name, interface_type_name });
+            // try writeZigTypeFromDbusSig(output, signal.args);
+            try output.print("    pub const {s}Args = struct{{", .{signal.name});
+            for (signal.args, 0..) |arg, i| {
+                try printArg(output, arg, i);
+                if (i != signal.args.len - 1) try output.writeAll(", ");
+            }
+            try output.writeAll("};\n");
+        }
+
+        try output.print("    pub const signalPropertiesChanged = dbus.generatePropertiesChangedFunction(Self, \"{s}\");\n", .{interface_type_name});
+
+        for (interface.properties) |property| {
+            const property_type = ZigTypePrinter{ .s = property.type };
+            if (property.access == .read or property.access == .readwrite) {
+                try output.print(
+                    \\    pub fn getProperty{s}(self: *{s}) {} {{}}
+                    \\
+                , .{ property.name, interface_type_name, property_type });
+            }
+            if (property.access == .write or property.access == .readwrite) {
+                try output.print(
+                    \\    pub fn setProperty{s}(self: *{s}, value: {}) void {{}}
+                    \\
+                , .{ property.name, interface_type_name, property_type });
+            }
+        }
 
         try output.writeAll("};\n");
     }
@@ -191,6 +281,7 @@ pub const Options = struct {
     allocator: std.mem.Allocator,
     pairs: []Pair,
     root: ?[:0]const u8 = null,
+    server: bool = false,
     pub const Pair = struct {
         input_filename: ?[:0]const u8 = null,
         output_filename: ?[:0]const u8 = null,
@@ -283,6 +374,8 @@ pub const Options = struct {
                 if (pair.addOutput(args.next().?)) |_pair| try list.append(_pair);
             } else if (argLongMatch(arg, root_long)) {
                 opts.root = arg[root_long.len..];
+            } else if (mem.eql(u8, arg, "-s") or mem.eql(u8, arg, "--server")) {
+                opts.server = true;
             } else if (mem.eql(u8, arg, "-h") or mem.eql(u8, arg, "--help")) {
                 exitHelp(executable, 0);
             } else {
@@ -313,6 +406,7 @@ fn exitHelp(executable: [:0]const u8, exit_status: u8) void {
         \\ -i, --input=<filename>     specify input file, default to stdin
         \\ -o, --output=<filename>    specify output file, default to stdout
         \\ -r, --root=<filename>      specify file for root of module
+        \\ -s, --server               generate skeleton server files instead of proxies
         \\example:
         \\ {0s} -i notify.xml -o notify.zig ...
         \\ {0s} -r rootfile.zig -i notify.xml -o notify.zig ...

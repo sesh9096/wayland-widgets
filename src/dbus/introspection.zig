@@ -23,7 +23,7 @@ const ComptimeWriter = struct {
 };
 
 pub const Node = struct {
-    name: []const u8,
+    name: []const u8 = "/",
     interfaces: []const Interface,
     children: []const Node = &.{},
     pub fn format(self: Node, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
