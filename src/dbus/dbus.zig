@@ -9,14 +9,12 @@ pub const c = @cImport({
 });
 pub const dbus_bool_t = enum(u32) { false = 0, true = 1 };
 
-pub const BusType = enum(c_int) {
-    session = c.DBUS_BUS_SESSION,
-    system = c.DBUS_BUS_SYSTEM,
-    starter = c.DBUS_BUS_STARTER,
-};
-pub extern fn dbus_bus_get(@"type": BusType, @"error": ?*Error) ?*Connection;
-pub const busGet = dbus_bus_get;
 pub const GenericError = error{Failed};
+
+pub const busGet = Connection.dbus_bus_get;
+
+/// https://dbus.freedesktop.org/doc/api/html/group__DBusConnection.html
+/// https://dbus.freedesktop.org/doc/api/html/group__DBusBus.html
 pub const Connection = opaque {
     pub extern fn dbus_connection_get_unix_fd(connection: *Connection, fd: *c_int) dbus_bool_t;
     pub fn getFd(connection: *Connection) GenericError!i32 {
@@ -75,18 +73,6 @@ pub const Connection = opaque {
     pub extern fn dbus_connection_remove_filter(connection: *Connection, function: HandleMessageFunction, user_data: ?*anyopaque) void;
     pub const removeFilter = dbus_connection_remove_filter;
 
-    pub extern fn dbus_bus_request_name(connection: *Connection, name: [*:0]const u8, flags: u32, err: *Error) i32;
-    pub const requestName = dbus_bus_request_name;
-
-    pub extern fn dbus_bus_release_name(connection: *Connection, name: [*:0]const u8, err: *Error) i32;
-    pub const releaseName = dbus_bus_release_name;
-
-    pub extern fn dbus_bus_add_match(connection: *Connection, rule: [*:0]const u8, err: *Error) void;
-    pub const addMatch = dbus_bus_add_match;
-
-    pub extern fn dbus_bus_remove_match(connection: *Connection, rule: [*:0]const u8, err: *Error) void;
-    pub const removeMatch = dbus_bus_remove_match;
-
     pub extern fn dbus_connection_dispatch(connection: *Connection) void;
     pub const dispatch = dbus_connection_dispatch;
 
@@ -123,6 +109,91 @@ pub const Connection = opaque {
         }
     }
     pub fn doNothing(_: *Connection, _: *anyopaque) callconv(.C) void {}
+
+    // bus methods
+
+    pub const BusType = enum(c_int) {
+        session = c.DBUS_BUS_SESSION,
+        system = c.DBUS_BUS_SYSTEM,
+        starter = c.DBUS_BUS_STARTER,
+    };
+    pub extern fn dbus_bus_get(@"type": BusType, @"error": ?*Error) ?*Connection;
+    pub const get = dbus_bus_get;
+
+    pub extern fn dbus_bus_get_private(@"type": BusType, @"error": ?*Error) ?*Connection;
+    pub const getPrivate = dbus_bus_get_private;
+
+    pub extern fn dbus_bus_register(connection: *Connection, @"error": ?*Error) dbus_bool_t;
+    /// generally not needed, dbus_bus_get/get method is generally what you need
+    pub inline fn register(connection: *Connection, @"error": ?*Error) bool {
+        return dbus_bus_register(connection, @"error");
+    }
+
+    pub extern fn dbus_bus_name_has_owner(connection: *Connection, name: [*:0]const u8, @"error": ?*Error) dbus_bool_t;
+    pub inline fn nameHasOwner(connection: *Connection, name: [*:0]const u8, @"error": ?*Error) bool {
+        return dbus_bus_name_has_owner(connection, name, @"error") == .true;
+    }
+
+    /// Replies to request for a name
+    pub const RequestNameReply = enum(c_int) {
+        /// error is set
+        err = -1,
+        /// Service has become the primary owner of the requested name
+        primary_owner = 1,
+        /// Service could not become the primary owner and has been placed in the queue
+        in_queue = 2,
+        /// Service is already in the queue
+        exists = 3,
+        /// Service is already the primary owner
+        already_owner = 4,
+    };
+    pub extern fn dbus_bus_request_name(connection: *Connection, name: [*:0]const u8, flags: u32, err: ?*Error) RequestNameReply;
+    pub const requestName = dbus_bus_request_name;
+
+    ///  Replies to releasing a name
+    pub const ReleaseNameReply = enum(c_int) {
+        /// error is set
+        err = -1,
+        /// Service was released from the given name
+        released = 1,
+        /// The given name does not exist on the bus
+        non_existent = 2,
+        /// Service is not an owner of the given name
+        not_owner = 3,
+    };
+    pub extern fn dbus_bus_release_name(connection: *Connection, name: [*:0]const u8, err: ?*Error) ReleaseNameReply;
+    pub const releaseName = dbus_bus_release_name;
+
+    pub extern fn dbus_bus_get_unique_name(connection: *Connection) ?[*:0]const u8;
+    pub const getUniqueName = dbus_bus_get_unique_name;
+
+    pub extern fn dbus_bus_set_unique_name(connection: *Connection, unique_name: [*:0]const u8) dbus_bool_t;
+    /// note: should not be using unless implementing a custom registration function
+    pub inline fn setUniqueName(connection: *Connection, unique_name: [*:0]const u8) bool {
+        return dbus_bus_set_unique_name(connection, unique_name) == .true;
+    }
+
+    pub extern fn dbus_bus_get_unix_user(connection: *Connection, name: [*:0]const u8, err: ?*Error) c_ulong;
+    pub const getUnixUser = dbus_bus_get_unix_user;
+
+    ///Replies to service starts, may not be one of these on error
+    pub const StartReply = enum(u32) {
+        /// Service was auto started
+        reply_success = 1,
+        /// Service was already running
+        reply_already_running = 2,
+    };
+    pub extern fn dbus_bus_start_service_by_name(connection: *Connection, name: [*:0]const u8, flags: u32, result: *StartReply, @"error": ?*Error) dbus_bool_t;
+    pub inline fn startServiceByName(connection: *Connection, name: [*:0]const u8, flags: u32, result: *StartReply, @"error": ?*Error) bool {
+        return dbus_bus_start_service_by_name(connection, name, flags, result, @"error") == .true;
+    }
+
+    /// flags should be 0
+    pub extern fn dbus_bus_add_match(connection: *Connection, rule: [*:0]const u8, err: ?*Error) void;
+    pub const addMatch = dbus_bus_add_match;
+
+    pub extern fn dbus_bus_remove_match(connection: *Connection, rule: [*:0]const u8, err: ?*Error) void;
+    pub const removeMatch = dbus_bus_remove_match;
 };
 
 pub const Watch = opaque {
