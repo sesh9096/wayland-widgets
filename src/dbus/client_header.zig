@@ -2,6 +2,9 @@ const std = @import("std");
 const dbus = @import("dbus");
 const mem = std.mem;
 const log = std.log;
+const assert = std.debug.assert;
+const SendingOptions = dbus.SendingOptions;
+const SendingError = dbus.SendingError;
 const Allocator = std.mem.Allocator;
 const Self = @This();
 
@@ -12,9 +15,11 @@ pub fn register(
     bus_name: [:0]const u8,
     path: [:0]const u8,
 ) void {
-    self.connection = connection;
-    self.bus_name = bus_name;
-    self.path = path;
+    self.* = .{
+        .connection = connection,
+        .bus_name = bus_name,
+        .path = path,
+    };
     var buf: [1024]u8 = undefined;
     const str = std.fmt.bufPrintZ(&buf, "type=signal,sender={s},path={s}", .{ bus_name, path }) catch unreachable;
     var err = dbus.Error{};
@@ -45,7 +50,7 @@ pub fn signalHandler(connection: *dbus.Connection, message: *dbus.Message, user_
                     return .not_yet_handled;
                 }
             } else {
-                log.warn("Unknown signal {?s}", .{message.getMember()});
+                log.warn("Ignoring unknown signal org.freedesktop.DBus.Properties.{?s}", .{message.getMember()});
                 return .not_yet_handled;
             }
         }
@@ -57,7 +62,7 @@ pub fn signalHandler(connection: *dbus.Connection, message: *dbus.Message, user_
                 }
             }
         }
-        log.info("Unknown signal {s}.{?s}", .{ ifname, message.getMember() });
+        log.info("Ignoring unknown signal {s}.{?s}", .{ ifname, message.getMember() });
     }
     return .not_yet_handled;
 }
@@ -66,18 +71,19 @@ fn generateSignalHander(handler: anytype) *const fn (@typeInfo(@TypeOf(handler))
         pub fn _function(interface: @typeInfo(@TypeOf(handler)).Fn.params[0].type.?, message: *dbus.Message, user_data: *anyopaque) dbus.HandlerResult {
             const signal_name = message.getMember().?;
             const Signal = @typeInfo(@TypeOf(handler)).Fn.params[1].type.?;
+            const data: @typeInfo(@TypeOf(handler)).Fn.params[2].type.? = @alignCast(@ptrCast(user_data));
             var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
             defer _ = arena.reset(.free_all);
             if (std.mem.orderZ(u8, message.getInterface().?, "org.freedesktop.DBus.Properties") == .eq) {
                 // PropertiesChanged
                 const args = message.getArgsAnytype(PropertiesChangedArgs, arena.allocator()) catch unreachable;
-                handler(interface, Signal{ .PropertiesChanged = args }, user_data);
+                handler(interface, Signal{ .PropertiesChanged = args }, data);
                 return .handled;
             }
             inline for (@typeInfo(Signal).Union.fields) |field| {
                 if (std.mem.orderZ(u8, field.name, signal_name) == .eq) {
                     const args = message.getArgsAnytype(field.type, arena.allocator()) catch unreachable;
-                    handler(interface, @unionInit(Signal, field.name, args), user_data);
+                    handler(interface, @unionInit(Signal, field.name, args), data);
                     return .handled;
                 }
             } else {
@@ -96,89 +102,94 @@ fn methodCallGeneric(
     comptime interface_field_name: [:0]const u8,
     method_name: [:0]const u8,
     args: anytype,
+    sending_options: dbus.SendingOptions,
     ReplyArgsType: type,
-) Allocator.Error!dbus.MethodPendingCall(ReplyArgsType) {
+) dbus.SendingError!?dbus.MethodPendingCall(ReplyArgsType) {
     const self: *Self = @fieldParentPtr(interface_field_name, interface);
     const connection = self.connection;
-    const message = dbus.Message.newMethodCall(
+    return connection.methodCallWithOptionsAndReply(
         self.bus_name,
         self.path,
         @typeInfo(@TypeOf(interface)).Pointer.child.interface,
         method_name,
-    ) orelse return error.OutOfMemory;
-    errdefer message.unref();
-    try message.appendArgsAnytype(args);
-
-    var pending_return: dbus.MethodPendingCall(ReplyArgsType) = undefined;
-    if (!connection.sendWithReply(message, &pending_return.p, -1)) return error.OutOfMemory;
-    return pending_return;
+        args,
+        sending_options,
+        dbus.MethodPendingCall(ReplyArgsType),
+    );
 }
 fn getPropertyGeneric(
     interface: anytype,
     comptime interface_field_name: [:0]const u8,
     property_name: [*:0]const u8,
+    _sending_options: dbus.SendingOptions,
     PropertyType: type,
-) Allocator.Error!dbus.GetPropertyPendingCall(PropertyType) {
+) dbus.SendingError!dbus.GetPropertyPendingCall(PropertyType) {
     const self: *Self = @fieldParentPtr(interface_field_name, interface);
     const connection = self.connection;
-    const message = dbus.Message.newMethodCall(
+    const interface_name: [*:0]const u8 = @typeInfo(@TypeOf(interface)).Pointer.child.interface;
+    var sending_options = _sending_options;
+    if (sending_options.no_reply) {
+        // we always want a reply
+        sending_options.no_reply = false;
+        log.warn("no_reply set on org.freedesktop.DBus.Properties.Get call", .{});
+    }
+    return (try connection.methodCallWithOptionsAndReply(
         self.bus_name,
         self.path,
         "org.freedesktop.DBus.Properties",
         "Get",
-    ) orelse return error.OutOfMemory;
-    errdefer message.unref();
-    const interface_name: [*:0]const u8 = @typeInfo(@TypeOf(interface)).Pointer.child.interface;
-    try message.appendArgsAnytype(.{ interface_name, property_name });
-
-    var pending_return: dbus.GetPropertyPendingCall(PropertyType) = undefined;
-    if (!connection.sendWithReply(message, &pending_return.p, -1)) return error.OutOfMemory;
-    return pending_return;
+        .{ interface_name, property_name },
+        sending_options,
+        dbus.GetPropertyPendingCall(PropertyType),
+    )).?;
 }
 fn setPropertyGeneric(
     interface: anytype,
     comptime interface_field_name: [:0]const u8,
     property_name: [*:0]const u8,
     value: anytype,
-) Allocator.Error!void {
+) SendingError!void {
     const self: *Self = @fieldParentPtr(interface_field_name, interface);
     const connection = self.connection;
-    const message = connection.newMethodCall(
+    const interface_name: [*:0]const u8 = @typeInfo(@TypeOf(interface)).Pointer.child.interface;
+    assert(try connection.methodCallWithOptionsAndReply(
         self.bus_name,
         self.path,
         "org.freedesktop.DBus.Properties",
         "Set",
-    ) orelse return error.OutOfMemory;
-    errdefer message.unref();
-    const interface_name: [*:0]const u8 = @typeInfo(@TypeOf(interface)).Pointer.child.interface;
-    if (!message.appendArgs(.{
-        interface_name,
-        property_name,
-        @unionInit(dbus.Arg, @tagName(dbus.Arg.fromType(@TypeOf(value))), value),
-    })) return error.OutOfMemory;
-    message.setNoReply(true);
-    if (!connection.send(message, null)) return error.OutOfMemory;
+        .{
+            interface_name,
+            property_name,
+            @unionInit(dbus.Arg, @tagName(dbus.Arg.fromType(@TypeOf(value))), value),
+        },
+        .{ .no_reply = true },
+        struct { p: *dbus.PendingCall },
+    ) == null);
 }
 fn getAllGeneric(
     interface: anytype,
     comptime interface_field_name: [:0]const u8,
+    _sending_options: SendingOptions,
     PropertiesType: type,
-) Allocator.Error!dbus.GetAllPendingCall(PropertiesType) {
+) SendingError!dbus.GetAllPendingCall(PropertiesType) {
     const self: *Self = @fieldParentPtr(interface_field_name, interface);
     const connection = self.connection;
-    const message = dbus.Message.newMethodCall(
+    const interface_name: [*:0]const u8 = @typeInfo(@TypeOf(interface)).Pointer.child.interface;
+    var sending_options = _sending_options;
+    if (sending_options.no_reply) {
+        // we always want a reply
+        sending_options.no_reply = false;
+        log.warn("no_reply set on org.freedesktop.DBus.Properties.GetAll call", .{});
+    }
+    return (try connection.methodCallWithOptionsAndReply(
         self.bus_name,
         self.path,
         "org.freedesktop.DBus.Properties",
         "GetAll",
-    ) orelse return error.OutOfMemory;
-    errdefer message.unref();
-    const interface_name: [*:0]const u8 = @typeInfo(@TypeOf(interface)).Pointer.child.interface;
-    try message.appendArgsAnytype(.{interface_name});
-
-    var pending_return: dbus.GetAllPendingCall(PropertiesType) = undefined;
-    if (!connection.sendWithReply(message, &pending_return.p, -1)) return error.OutOfMemory;
-    return pending_return;
+        .{interface_name},
+        sending_options,
+        dbus.GetAllPendingCall(PropertiesType),
+    )).?;
 }
 
 connection: *dbus.Connection = undefined,

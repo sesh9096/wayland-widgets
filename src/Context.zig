@@ -136,12 +136,11 @@ pub fn dbusAddWatch(dbus_watch: *dbus.Watch, user_data: *anyopaque) callconv(.C)
         // .out = (flags & dbus.Watch.WRITABLE) != 0,
         .out = false,
     };
-    log.debug("adding watch, events: 0x{x}", .{@as(i16, @bitCast(events))});
     watch.addOrModify(
         .{ .fd = dbus_watch.getFd(), .events = events },
         .{ .data = dbus_watch, .handle_event = dbusWatchHandle },
     ) catch {
-        log.warn("out of memory", .{});
+        log.err("out of memory", .{});
         return .false;
     };
     return .true;

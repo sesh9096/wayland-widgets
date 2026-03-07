@@ -24,15 +24,43 @@ pub const Connection = opaque {
     }
 
     pub extern fn dbus_connection_send(connection: *Connection, message: *Message, client_serial: ?*u32) dbus_bool_t;
-    pub const send = dbus_connection_send;
+    pub inline fn send(connection: *Connection, message: *Message, client_serial: ?*u32) bool {
+        return dbus_connection_send(connection, message, client_serial) == .true;
+    }
 
-    pub extern fn dbus_connection_send_with_reply(connection: *Connection, message: *Message, pending_return: ?**PendingCall, timeout_milliseconds: c_int) dbus_bool_t;
-    pub inline fn sendWithReply(connection: *Connection, message: *Message, pending_return: ?**PendingCall, timeout_milliseconds: c_int) bool {
+    pub extern fn dbus_connection_send_with_reply(connection: *Connection, message: *Message, pending_return: ?*?*PendingCall, timeout_milliseconds: c_int) dbus_bool_t;
+    pub inline fn sendWithReply(connection: *Connection, message: *Message, pending_return: ?*?*PendingCall, timeout_milliseconds: c_int) bool {
         return dbus_connection_send_with_reply(connection, message, pending_return, timeout_milliseconds) == .true;
     }
 
     pub extern fn dbus_connection_send_with_reply_and_block(connection: *Connection, message: *Message, timeout_milliseconds: c_int, err: *Error) ?*Message;
     pub const sendWithReplyAndBlock = dbus_connection_send_with_reply_and_block;
+
+    /// used by proxies to do method calls
+    pub fn methodCallWithOptionsAndReply(
+        connection: *Connection,
+        destination: ?[*:0]const u8,
+        path: [*:0]const u8,
+        iface: ?[*:0]const u8,
+        method: [*:0]const u8,
+        args: anytype,
+        sending_options: SendingOptions,
+        PendingCallWrapperType: type,
+    ) SendingError!?PendingCallWrapperType {
+        const message = Message.newMethodCall(destination, path, iface, method) orelse return error.OutOfMemory;
+        errdefer message.unref();
+        try message.appendArgsAnytype(args);
+
+        var pending_return: ?*PendingCall = null;
+        if (sending_options.no_reply) {
+            message.setNoReply(true);
+            if (!connection.send(message, null)) return error.OutOfMemory;
+        } else {
+            if (!connection.sendWithReply(message, &pending_return, sending_options.timeout_milliseconds)) return error.OutOfMemory;
+            if (pending_return) |p| return .{ .p = p };
+        }
+        return null;
+    }
 
     pub extern fn dbus_connection_flush(connection: *Connection) void;
     pub const flush = dbus_connection_flush;
@@ -1710,6 +1738,13 @@ pub inline fn isDictEntry(T: type) bool {
     };
 }
 
+pub const SendingOptions = struct {
+    timeout_milliseconds: i32 = -1,
+    // if true,
+    no_reply: bool = false,
+};
+pub const SendingError = Allocator.Error;
+
 pub const PendingCall = opaque {
     pub extern fn dbus_pending_call_ref(pending: *PendingCall) *PendingCall;
     pub const ref = dbus_pending_call_ref;
@@ -1774,6 +1809,7 @@ pub fn PendingCallWrapper(
         ) Allocator.Error!void {
             const function = struct {
                 pub fn _function(pending: *PendingCall, user_data: *anyopaque) callconv(.C) void {
+                    defer pending.unref();
                     assert(pending.getCompleted());
                     const reply = pending.stealReply().?;
                     defer reply.unref();
@@ -1806,6 +1842,9 @@ pub fn PendingCallWrapper(
             }._function else null;
             if (!self.p.setNotify(function, @alignCast(@ptrCast(data)), free_function)) return error.OutOfMemory;
         }
+        pub inline fn unref(self: Self) void {
+            self.p.unref();
+        }
         pub inline fn cancel(self: Self) void {
             self.p.cancel();
         }
@@ -1815,11 +1854,25 @@ pub fn PendingCallWrapper(
         pub inline fn block(self: Self) void {
             self.p.block();
         }
+        /// block until reply is received
         pub fn awaitReply(self: Self, allocator: Allocator) TypeMismatchOrAllocatorError!ReplyType {
+            defer self.p.unref();
             self.p.block();
             const reply = self.p.stealReply().?;
             defer reply.unref();
-            return messageToArg(reply, allocator);
+            switch (reply.getType()) {
+                .method_return => {
+                    return messageToArg(reply, allocator);
+                },
+                .@"error" => {
+                    log.err("got error {?s}:{s}", .{ reply.getErrorName(), (reply.getArgsAnytype(struct { [*:0]const u8 }, std.testing.failing_allocator) catch unreachable)[0] });
+                    return error.TypeMismatch;
+                },
+                else => |tag| {
+                    log.err("unexpected {}", .{tag});
+                    unreachable;
+                },
+            }
         }
     };
 }

@@ -37,11 +37,8 @@ const Options = struct {
 };
 
 pub fn main() !void {
-    var GPA = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = GPA.allocator();
-    // var buf: [4096]u8 = undefined;
-    // var fba = std.heap.FixedBufferAllocator.init(&buf);
-    // const allocator = fba.allocator();
+    // var GPA = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = std.heap.c_allocator;
     var context: Context = undefined;
     try context.configure(allocator);
     // try context.getGlobals();
@@ -64,25 +61,20 @@ pub fn main() !void {
         .actions = &.{},
         .hints = &.{},
         .expire_timeout = -1,
-    });
+    }, .{})).?;
     try pending.setNotify(&notification_id, handleNotifyReturn, null);
-
-    var _status_notifier_watcher = StatusNotifierWatcher{};
-    _status_notifier_watcher.register(dbus_connection, "org.kde.StatusNotifierWatcher", "/StatusNotifierWatcher");
-    defer _status_notifier_watcher.unRegister();
-    const status_notifier_watcher = &_status_notifier_watcher.statusNotifierWatcher;
-    status_notifier_watcher.setSignalHandler(@as(*anyopaque, undefined), handleStatusNotifierWatcherSignal);
-    const pending_registered_items = try status_notifier_watcher.getRegisteredStatusNotifierItems();
-    try pending_registered_items.setNotify(@as(*anyopaque, undefined), handleGetStatusNotifierWatcherItems, null);
-
-    const pending_version = try status_notifier_watcher.getProtocolVersion();
-    try pending_version.setNotify(@as(*anyopaque, undefined), handleGetProtocolVersion, null);
 
     // var menu = DBusMenu{};
     // menu.register(dbus_connection, "bus_name", "object_path");
     // defer menu.unRegister();
-    const ret = dbus_connection.requestName("org.testing.tester", 0, &err);
-    _ = ret;
+    switch (dbus_connection.requestName("org.testing.tester", 0, &err)) {
+        .err => {
+            log.err("{}", .{err});
+            unreachable;
+        },
+        .primary_owner, .already_owner => {},
+        .in_queue, .exists => {},
+    }
     var notification_handler = NotificationHandler.init(allocator);
     try notification_handler.notifications.registerTasks(&context.scheduler);
     try dbus_connection.registerObject(&notification_handler);
@@ -266,14 +258,6 @@ pub fn markDirty(surface: *Surface) void {
 fn handleNotifyReturn(args: Notifications.NotificationsInterface.NotifyReturnArgs, ptr: *u32) void {
     ptr.* = args.id;
     log.info("notification id: {}", .{args.id});
-}
-fn handleStatusNotifierWatcherSignal(_: *StatusNotifierWatcher.StatusNotifierWatcherInterface, signal: StatusNotifierWatcher.StatusNotifierWatcherInterface.Signal, _: *anyopaque) void {
-    switch (signal) {
-        inline else => |payload, tag| log.debug("{s}({})", .{ @tagName(tag), dbus.argStructPrinter(payload) }),
-    }
-}
-fn handleGetStatusNotifierWatcherItems(args: []const [*:0]const u8, _: *anyopaque) void {
-    log.debug("status notifier items: {}", .{dbus.argStructPrinter(.{args})});
 }
 fn handleGetProtocolVersion(arg: i32, _: *anyopaque) void {
     log.debug("protocol version: {}", .{arg});

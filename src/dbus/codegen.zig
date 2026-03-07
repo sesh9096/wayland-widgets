@@ -91,38 +91,36 @@ pub fn writeProxy(node: introspection.Node, output: anytype) !void {
         try output.print("pub const {s} = struct {{\n", .{interface_type_name});
         try output.print("    pub const interface = \"{s}\";\n", .{interface.name});
 
-        if (interface.signals.len > 0) {
-            // handlers
-            try output.print(
-                \\    signal_handler: ?*const fn (*{0s}, *dbus.Message, *anyopaque) dbus.HandlerResult = null,
-                \\    data: *anyopaque = undefined,
-                \\
-                \\    pub fn setSignalHandler(self: *{0s}, data: anytype, handler: fn (*{0s}, Signal, @TypeOf(data)) void) void {{
-                \\        self.signal_handler = generateSignalHander(handler);
-                \\        self.data = @ptrCast(data);
-                \\    }}
-                \\
-            , .{interface_type_name});
-            try output.writeAll("    pub const Signal = union(enum) {\n");
-            for (interface.signals) |signal| {
-                try output.print("        {s}: struct{{", .{signal.name});
-                // try writeZigTypeFromDbusSig(output, signal.args);
-                for (signal.args, 0..) |arg, i| {
-                    if (arg.direction == .in) {
-                        try printArg(output, arg, i);
-                        if (i != signal.args.len - 1) try output.writeAll(", ");
-                    }
+        // handlers
+        try output.print(
+            \\    signal_handler: ?*const fn (*{0s}, *dbus.Message, *anyopaque) dbus.HandlerResult = null,
+            \\    data: *anyopaque = undefined,
+            \\
+            \\    pub fn setSignalHandler(self: *{0s}, data: anytype, handler: fn (*{0s}, Signal, @TypeOf(data)) void) void {{
+            \\        self.signal_handler = generateSignalHander(handler);
+            \\        self.data = @ptrCast(data);
+            \\    }}
+            \\
+        , .{interface_type_name});
+        try output.writeAll("    pub const Signal = union(enum) {\n");
+        for (interface.signals) |signal| {
+            try output.print("        {s}: struct{{", .{signal.name});
+            // try writeZigTypeFromDbusSig(output, signal.args);
+            for (signal.args, 0..) |arg, i| {
+                if (arg.direction == .in) {
+                    try printArg(output, arg, i);
+                    if (i != signal.args.len - 1) try output.writeAll(", ");
                 }
-                try output.writeAll("},\n");
             }
-            try output.writeAll("        PropertiesChanged: PropertiesChangedArgs,\n");
-            try output.writeAll("    };\n");
+            try output.writeAll("},\n");
         }
+        try output.writeAll("        PropertiesChanged: PropertiesChangedArgs,\n");
+        try output.writeAll("    };\n");
 
         for (interface.methods) |method| {
             try output.print(
-                \\    pub fn {s}(self: *{s}, args: {0s}Args) !dbus.MethodPendingCall({0s}ReturnArgs) {{
-                \\        return methodCallGeneric(self, "{s}", "{0s}", args, {0s}ReturnArgs);
+                \\    pub fn {s}(self: *{s}, args: {0s}Args, sending_options: SendingOptions) !?dbus.MethodPendingCall({0s}ReturnArgs) {{
+                \\        return methodCallGeneric(self, "{s}", "{0s}", args, sending_options, {0s}ReturnArgs);
                 \\    }}
                 \\
             , .{ method.name, interface_type_name, interface_field_name });
@@ -151,8 +149,8 @@ pub fn writeProxy(node: introspection.Node, output: anytype) !void {
             const property_type = ZigTypePrinter{ .s = property.type };
             if (property.access == .read or property.access == .readwrite) {
                 try output.print(
-                    \\    pub fn get{s}(self: *{s}) !dbus.GetPropertyPendingCall({}) {{
-                    \\        return getPropertyGeneric(self, "{s}", "{0s}", {2});
+                    \\    pub fn get{s}(self: *{s}, sending_options: SendingOptions) SendingError!dbus.GetPropertyPendingCall({}) {{
+                    \\        return getPropertyGeneric(self, "{s}", "{0s}", sending_options, {2});
                     \\    }}
                     \\
                 , .{ property.name, interface_type_name, property_type, interface_field_name });
