@@ -6,7 +6,7 @@ const assert = std.debug.assert;
 const dbus = @import("dbus.zig");
 const Parser = @import("xml.zig").Parser;
 pub const isInterface = dbus.isInterface;
-pub const getSignature = dbus.getSignature;
+pub const signatureFromType = dbus.signatureFromType;
 const ComptimeWriter = struct {
     comptime buf: []const u8 = &.{},
     pub fn write(self: *ComptimeWriter, bytes: []const u8) !void {
@@ -198,11 +198,11 @@ pub inline fn genInterfaceIntrospection(InterfaceType: type) Interface {
                     !@hasDecl(params[1].type.?, "dbus_type"))
                 {
                     for (@typeInfo(params[1].type.?).Struct.fields) |field| {
-                        args = args ++ [_]Arg{.{ .name = field.name, .type = getSignature(field.type), .direction = .in }};
+                        args = args ++ [_]Arg{.{ .name = field.name, .type = signatureFromType(field.type), .direction = .in }};
                     }
                 } else {
                     for (params[1..]) |param| {
-                        args = args ++ .{.{ .type = getSignature(param.type.?), .direction = .in }};
+                        args = args ++ .{.{ .type = signatureFromType(param.type.?), .direction = .in }};
                     }
                 }
 
@@ -211,11 +211,11 @@ pub inline fn genInterfaceIntrospection(InterfaceType: type) Interface {
                     !@hasDecl(fn_info.return_type.?, "dbus_type"))
                 {
                     for (@typeInfo(fn_info.return_type.?).Struct.fields) |field| {
-                        args = args ++ .{.{ .name = field.name, .type = getSignature(field.type), .direction = .out }};
+                        args = args ++ .{.{ .name = field.name, .type = signatureFromType(field.type), .direction = .out }};
                     }
                 } else {
                     if (fn_info.return_type) |return_type| {
-                        if (return_type != void) args = args ++ [_]Arg{.{ .type = getSignature(return_type), .direction = .out }};
+                        if (return_type != void) args = args ++ [_]Arg{.{ .type = signatureFromType(return_type), .direction = .out }};
                     }
                 }
                 methods = methods ++ [_]Method{.{ .name = member_name, .args = args }};
@@ -232,11 +232,11 @@ pub inline fn genInterfaceIntrospection(InterfaceType: type) Interface {
                     !@hasDecl(params[1].type.?, "dbus_type"))
                 {
                     for (@typeInfo(params[1].type.?).Struct.fields) |field| {
-                        args = args ++ [_]Arg{.{ .name = field.name, .type = getSignature(field.type) }};
+                        args = args ++ [_]Arg{.{ .name = field.name, .type = signatureFromType(field.type) }};
                     }
                 } else {
                     for (params[1..]) |param| {
-                        args = args ++ .{.{ .type = getSignature(param.type.?) }};
+                        args = args ++ .{.{ .type = signatureFromType(param.type.?) }};
                     }
                 }
 
@@ -248,7 +248,7 @@ pub inline fn genInterfaceIntrospection(InterfaceType: type) Interface {
                 const params = fn_info.params;
                 const write_access = blk: for (properties) |property| if (std.mem.eql(u8, property.name.?, member_name)) break :blk true else false;
                 assert(params[0].type == *InterfaceType or params[0].type == *const InterfaceType and params.len == 2);
-                properties = properties ++ [_]Property{.{ .name = member_name, .access = if (write_access) .readwrite else .read, .type = getSignature(params[1].type) }};
+                properties = properties ++ [_]Property{.{ .name = member_name, .access = if (write_access) .readwrite else .read, .type = signatureFromType(params[1].type) }};
             },
             .setProperty => {
                 const function = @field(InterfaceType, decl.name);
@@ -256,7 +256,7 @@ pub inline fn genInterfaceIntrospection(InterfaceType: type) Interface {
                 const params = fn_info.params;
                 const read_access = blk: for (properties) |property| if (std.mem.eql(u8, property.name.?, member_name)) break :blk true else false;
                 assert(params[0].type == *InterfaceType or params[0].type == *const InterfaceType and params.len == 2);
-                properties = properties ++ [_]Property{.{ .name = member_name, .access = if (read_access) .readwrite else .write, .type = getSignature(params[1].type) }};
+                properties = properties ++ [_]Property{.{ .name = member_name, .access = if (read_access) .readwrite else .write, .type = signatureFromType(params[1].type) }};
             },
         }
     }

@@ -179,8 +179,15 @@ pub fn writeProxy(node: introspection.Node, output: anytype) !void {
         }
         try output.writeAll("    };\n");
         try output.print(
-            \\    pub fn getAll(self: *{s}) !dbus.GetAllPendingCall(Properties) {{
-            \\        return getAllGeneric(self, "{s}", Properties);
+            \\    pub fn getAll(self: *{s}, sending_options: SendingOptions) !dbus.GetAllPendingCall(Properties) {{
+            \\        return getAllGeneric(self, "{s}", sending_options, Properties);
+            \\    }}
+            \\
+        , .{ interface_type_name, interface_field_name });
+
+        try output.print(
+            \\    pub fn getAllRaw(self: *{s}, sending_options: SendingOptions) !dbus.GetAllRawPendingCall {{
+            \\        return getAllRawGeneric(self, "{s}", sending_options);
             \\    }}
             \\
         , .{ interface_type_name, interface_field_name });

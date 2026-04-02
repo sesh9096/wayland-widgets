@@ -191,6 +191,30 @@ fn getAllGeneric(
         dbus.GetAllPendingCall(PropertiesType),
     )).?;
 }
+fn getAllRawGeneric(
+    interface: anytype,
+    comptime interface_field_name: [:0]const u8,
+    _sending_options: SendingOptions,
+) SendingError!dbus.GetAllRawPendingCall {
+    const self: *Self = @fieldParentPtr(interface_field_name, interface);
+    const connection = self.connection;
+    const interface_name: [*:0]const u8 = @typeInfo(@TypeOf(interface)).Pointer.child.interface;
+    var sending_options = _sending_options;
+    if (sending_options.no_reply) {
+        // we always want a reply
+        sending_options.no_reply = false;
+        log.warn("no_reply set on org.freedesktop.DBus.Properties.GetAll call", .{});
+    }
+    return (try connection.methodCallWithOptionsAndReply(
+        self.bus_name,
+        self.path,
+        "org.freedesktop.DBus.Properties",
+        "GetAll",
+        .{interface_name},
+        sending_options,
+        dbus.GetAllRawPendingCall,
+    )).?;
+}
 
 connection: *dbus.Connection = undefined,
 bus_name: [:0]const u8 = "",
