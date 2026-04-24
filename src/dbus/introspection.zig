@@ -4,7 +4,8 @@ const mem = std.mem;
 const testing = std.testing;
 const assert = std.debug.assert;
 const dbus = @import("dbus.zig");
-const Parser = @import("xml.zig").Parser;
+pub const xml = @import("xml.zig");
+const Parser = xml.Parser;
 pub const isInterface = dbus.isInterface;
 pub const signatureFromType = dbus.signatureFromType;
 const ComptimeWriter = struct {
@@ -516,6 +517,12 @@ pub fn parseArg(parser: *Parser, allocator: std.mem.Allocator) !Arg {
     var arg_direction = Arg.Direction.in;
     var annotations = std.ArrayList(Annotation).init(allocator);
     while (parser.next()) |event| switch (event) {
+        .open_tag => |name| {
+            if (std.mem.eql(u8, name, "annotation")) try annotations.append(try parseAnnotation(parser)) else {
+                log.err("unexpected tag {s}", .{name});
+                return error.InvalidXML;
+            }
+        },
         .attribute => |attr| {
             if (std.mem.eql(u8, attr.name, "name")) {
                 arg_name = attr.raw_value;

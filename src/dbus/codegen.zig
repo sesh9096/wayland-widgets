@@ -171,10 +171,17 @@ pub fn writeProxy(node: introspection.Node, output: anytype) !void {
             // getall properties
             const property_type = ZigTypePrinter{ .s = property.type };
             if (property.access == .read or property.access == .readwrite) {
-                try output.print(
-                    \\        {s}: {s},
-                    \\
-                , .{ property.name, property_type });
+                if (hasDefaultValue(property.annotations)) |annotation| {
+                    if (mem.eql(u8, annotation.value, "null")) {
+                        try output.print("        {s}: ?{s} = null", .{ property.name, property_type });
+                    } else {
+                        try output.print("        {s}: {s}", .{ property.name, property_type });
+                        try printDefaultValue(output, annotation);
+                    }
+                } else {
+                    try output.print("        {s}: {s} = undefined", .{ property.name, property_type });
+                }
+                try output.writeAll(",\n");
             }
         }
         try output.writeAll("    };\n");
@@ -488,6 +495,9 @@ pub fn printArg(writer: anytype, arg: introspection.Arg, arg_num: anytype) !void
     if (arg.name) |arg_name| {
         try writer.print("{s}: {}", .{ arg_name, type_printer });
     } else try writer.print("arg{}: {}", .{ arg_num, type_printer });
+    if (hasDefaultValue(arg.annotations)) |annotation| {
+        try printDefaultValue(writer, annotation);
+    }
 }
 
 pub fn interfaceFieldName(interface_name: []const u8, buf: []u8) [:0]const u8 {
@@ -503,4 +513,23 @@ pub fn interfaceTypeName(interface_field_name: []const u8, buf: []u8) [:0]const 
     std.mem.copyForwards(u8, buf[interface_field_name.len..], trailer);
     buf[interface_field_name.len + trailer.len] = 0;
     return @ptrCast(buf[0 .. interface_field_name.len + trailer.len]);
+}
+
+pub const default_value_annotation_name = "com.ZigDbus.DefaultValue";
+pub fn hasDefaultValue(annotations: []const introspection.Annotation) ?*const introspection.Annotation {
+    for (annotations) |*annotation| {
+        if (mem.eql(u8, annotation.name, default_value_annotation_name)) return annotation;
+    }
+    return null;
+}
+pub fn printDefaultValue(writer: anytype, annotation: *const introspection.Annotation) !void {
+    try writer.writeAll(" = ");
+    if (mem.eql(u8, annotation.value, "[]")) {
+        try writer.writeAll("&.{}");
+        return;
+    }
+    var attr = introspection.xml.Attribute{ .name = annotation.name, .raw_value = annotation.value };
+    while (attr.next()) |buf| {
+        try writer.writeAll(buf);
+    }
 }

@@ -428,7 +428,11 @@ pub const Message = opaque {
     pub const demarshalBytesNeeded = dbus_message_demarshal_bytes_needed;
 
     pub extern fn dbus_message_get_args(message: *Message, @"error": ?*Error, first_arg_type: ArgType, ...) dbus_bool_t;
-    pub const getArgs = dbus_message_get_args;
+    pub fn getArgs(message: *Message, @"error": ?*Error, first_arg_type: ArgType, ...) callconv(.C) bool {
+        var ap = @cVaStart();
+        defer @cVaEnd(&ap);
+        return dbus_message_get_args_valist(message, @"error", first_arg_type, &ap) == .true;
+    }
 
     pub extern fn dbus_message_get_args_valist(message: *Message, @"error": ?*Error, first_arg_type: ArgType, var_args: [*c]std.builtin.VaList) dbus_bool_t;
     pub inline fn getArgsVaList(message: *Message, @"error": ?*Error, first_arg_type: ArgType, var_args: [*c]std.builtin.VaList) bool {
@@ -444,7 +448,11 @@ pub const Message = opaque {
     pub const iterInitAppend = dbus_message_iter_init_append;
 
     pub extern fn dbus_message_append_args(message: ?*Message, first_arg_type: ArgType, ...) dbus_bool_t;
-    pub const appendArgs = dbus_message_append_args;
+    pub fn appendArgs(message: *Message, first_arg_type: ArgType, ...) callconv(.C) bool {
+        var ap = @cVaStart();
+        defer @cVaEnd(&ap);
+        return dbus_message_append_args_valist(message, first_arg_type, &ap) == .true;
+    }
 
     pub extern fn dbus_message_append_args_valist(message: ?*Message, first_arg_type: ArgType, var_args: [*c]std.builtin.VaList) dbus_bool_t;
     pub inline fn appendArgsVaList(message: ?*Message, first_arg_type: ArgType, var_args: [*c]std.builtin.VaList) bool {
@@ -1029,6 +1037,13 @@ pub const MessageIter = extern struct {
                 } else {
                     @compileError("Cannot convert type " ++ @typeName(ChildType) ++ " to dbus type");
                 }
+            },
+            .Optional => |info| {
+                // try iter.getAnytype(allocator, @as(*info.child, @ptrCast(dst)));
+                // dst.* = @as(*info.child, @ptrCast(dst));
+                var tmp: info.child = undefined;
+                try iter.getAnytype(allocator, &tmp);
+                dst.* = tmp;
             },
             else => {
                 @compileError("Cannot convert type " ++ @typeName(ChildType) ++ " to dbus type");
@@ -1975,7 +1990,7 @@ pub fn GetAllPendingCall(PropertiesType: type) type {
             if (iter.getArgType() != .array) return error.TypeMismatch;
             iter.recurse(&array_iter);
             if (array_iter.getArgType() != .dict_entry) return error.TypeMismatch;
-            var properties: PropertiesType = undefined;
+            var properties = PropertiesType{};
             for (0..@intCast(iter.getElementCount())) |_| {
                 var entry_iter: MessageIter = undefined;
                 array_iter.recurse(&entry_iter);
@@ -2147,11 +2162,10 @@ pub fn ArgStructPrinter(ArgStruct: type) type {
                         try writer.print("\"{}\"", .{field.fd});
                     } else {
                         try writer.writeByte('(');
-                        _ = info;
-                        // inline for (info.fields, 0..) |struct_field, i| {
-                        //     try printField(@field(field, struct_field.name), writer);
-                        //     if (i != info.fields.len - 1) try writer.writeAll(", ");
-                        // }
+                        inline for (info.fields, 0..) |struct_field, i| {
+                            try printField(@field(field, struct_field.name), writer);
+                            if (i != info.fields.len - 1) try writer.writeAll(", ");
+                        }
                         try writer.writeByte(')');
                     }
                 },

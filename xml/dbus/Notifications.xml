@@ -40,14 +40,26 @@
       </arg>
     </method>
     <method name="Notify">
-      <arg type="s" name="app_name" direction="in"/>
-      <arg type="u" name="replaces_id" direction="in"/>
-      <arg type="s" name="app_icon" direction="in"/>
+      <arg type="s" name="app_name" direction="in">
+        <annotation name="com.ZigDbus.DefaultValue" value='""'/>
+      </arg>
+      <arg type="u" name="replaces_id" direction="in">
+        <annotation name="com.ZigDbus.DefaultValue" value="0"/>
+      </arg>
+      <arg type="s" name="app_icon" direction="in">
+        <annotation name="com.ZigDbus.DefaultValue" value='""'/>
+      </arg>
       <arg type="s" name="summary" direction="in"/>
-      <arg type="s" name="body" direction="in"/>
-      <arg type="as" name="actions" direction="in"/>
+      <arg type="s" name="body" direction="in">
+        <annotation name="com.ZigDbus.DefaultValue" value='""'/>
+      </arg>
+      <arg type="as" name="actions" direction="in">
+        <annotation name="com.ZigDbus.DefaultValue" value="&amp;.{}"/>
+      </arg>
       <arg type="a{sv}" name="hints" direction="in"/>
-      <arg type="i" name="expire_timeout" direction="in"/>
+      <arg type="i" name="expire_timeout" direction="in">
+        <annotation name="com.ZigDbus.DefaultValue" value="-1"/>
+      </arg>
       <arg type="u" name="id" direction="out"/>
     </method>
     <method name="CloseNotification">
