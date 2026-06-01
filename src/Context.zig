@@ -127,7 +127,7 @@ pub fn configure(self: *Context, allocator: Allocator) !void {
     try self.getGlobals();
 }
 
-pub fn dbusAddWatch(dbus_watch: *dbus.Watch, user_data: *anyopaque) callconv(.C) dbus.dbus_bool_t {
+pub fn dbusAddWatch(dbus_watch: *dbus.Watch, user_data: *anyopaque) callconv(.C) bool {
     const watch: *Watch = @alignCast(@ptrCast(user_data));
     const flags = dbus_watch.getFlags();
     // TODO: implement writable properly
@@ -141,9 +141,9 @@ pub fn dbusAddWatch(dbus_watch: *dbus.Watch, user_data: *anyopaque) callconv(.C)
         .{ .data = dbus_watch, .handle_event = dbusWatchHandle },
     ) catch {
         log.err("out of memory", .{});
-        return .false;
+        return false;
     };
-    return .true;
+    return true;
 }
 pub fn dbusRemoveWatch(dbus_watch: *dbus.Watch, user_data: *anyopaque) callconv(.C) void {
     const watch: *Watch = @alignCast(@ptrCast(user_data));

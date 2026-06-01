@@ -16,24 +16,20 @@ pub const busGet = Connection.dbus_bus_get;
 /// https://dbus.freedesktop.org/doc/api/html/group__DBusConnection.html
 /// https://dbus.freedesktop.org/doc/api/html/group__DBusBus.html
 pub const Connection = opaque {
-    pub extern fn dbus_connection_get_unix_fd(connection: *Connection, fd: *c_int) dbus_bool_t;
+    pub extern fn dbus_connection_get_unix_fd(connection: *Connection, fd: *c_int) bool;
     pub fn getFd(connection: *Connection) GenericError!i32 {
         var fd: i32 = undefined;
-        if (dbus_connection_get_unix_fd(connection, &fd) == .true) return fd;
+        if (dbus_connection_get_unix_fd(connection, &fd)) return fd;
         return error.Failed;
     }
 
-    pub extern fn dbus_connection_send(connection: *Connection, message: *Message, client_serial: ?*u32) dbus_bool_t;
-    pub inline fn send(connection: *Connection, message: *Message, client_serial: ?*u32) bool {
-        return dbus_connection_send(connection, message, client_serial) == .true;
-    }
+    pub extern fn dbus_connection_send(connection: *Connection, message: *Message, client_serial: ?*u32) bool;
+    pub const send = dbus_connection_send;
 
-    pub extern fn dbus_connection_send_with_reply(connection: *Connection, message: *Message, pending_return: ?*?*PendingCall, timeout_milliseconds: c_int) dbus_bool_t;
-    pub inline fn sendWithReply(connection: *Connection, message: *Message, pending_return: ?*?*PendingCall, timeout_milliseconds: c_int) bool {
-        return dbus_connection_send_with_reply(connection, message, pending_return, timeout_milliseconds) == .true;
-    }
+    pub extern fn dbus_connection_send_with_reply(connection: *Connection, message: *Message, pending_return: ?*?*PendingCall, timeout_milliseconds: c_int) bool;
+    pub const sendWithReply = dbus_connection_send_with_reply;
 
-    pub extern fn dbus_connection_send_with_reply_and_block(connection: *Connection, message: *Message, timeout_milliseconds: c_int, err: *Error) ?*Message;
+    pub extern fn dbus_connection_send_with_reply_and_block(connection: *Connection, message: *Message, timeout_milliseconds: c_int, err: ?*Error) ?*Message;
     pub const sendWithReplyAndBlock = dbus_connection_send_with_reply_and_block;
 
     /// used by proxies to do method calls
@@ -65,15 +61,11 @@ pub const Connection = opaque {
     pub extern fn dbus_connection_flush(connection: *Connection) void;
     pub const flush = dbus_connection_flush;
 
-    pub extern fn dbus_connection_register_object_path(connection: *Connection, path: [*:0]const u8, vtable: *const ObjectPathVTable, user_data: *anyopaque) dbus_bool_t;
-    pub inline fn registerObjectPath(connection: *Connection, path: [*:0]const u8, vtable: *const ObjectPathVTable, user_data: *anyopaque) bool {
-        return dbus_connection_register_object_path(connection, path, vtable, user_data) == .true;
-    }
+    pub extern fn dbus_connection_register_object_path(connection: *Connection, path: [*:0]const u8, vtable: *const ObjectPathVTable, user_data: *anyopaque) bool;
+    pub const registerObjectPath = dbus_connection_register_object_path;
 
-    pub extern fn dbus_connection_try_register_object_path(connection: *Connection, path: [*:0]const u8, vtable: *const ObjectPathVTable, user_data: *anyopaque, err: *Error) dbus_bool_t;
-    pub inline fn tryRegisterObjectPath(connection: *Connection, path: [*:0]const u8, vtable: *const ObjectPathVTable, user_data: *anyopaque, err: *Error) bool {
-        return dbus_connection_try_register_object_path(connection, path, vtable, user_data, err) == .true;
-    }
+    pub extern fn dbus_connection_try_register_object_path(connection: *Connection, path: [*:0]const u8, vtable: *const ObjectPathVTable, user_data: *anyopaque, err: *Error) bool;
+    pub const tryRegisterObjectPath = dbus_connection_try_register_object_path;
 
     pub extern fn dbus_connection_set_watch_functions(
         connection: *Connection,
@@ -82,7 +74,7 @@ pub const Connection = opaque {
         toggled_function: ?WatchToggledFunction,
         data: *anyopaque,
         free_data_function: FreeFunction,
-    ) dbus_bool_t;
+    ) bool;
     pub const setWatchFunctions = dbus_connection_set_watch_functions;
 
     pub extern fn dbus_connection_set_dispatch_status_function(
@@ -93,10 +85,8 @@ pub const Connection = opaque {
     ) void;
     pub const setDispatchStatusFunction = dbus_connection_set_dispatch_status_function;
 
-    pub extern fn dbus_connection_add_filter(connection: *Connection, function: HandleMessageFunction, user_data: ?*anyopaque, free_data_function: ?FreeFunction) dbus_bool_t;
-    pub inline fn addFilter(connection: *Connection, function: HandleMessageFunction, user_data: ?*anyopaque, free_data_function: ?FreeFunction) bool {
-        return dbus_connection_add_filter(connection, function, user_data, free_data_function) == .true;
-    }
+    pub extern fn dbus_connection_add_filter(connection: *Connection, function: HandleMessageFunction, user_data: ?*anyopaque, free_data_function: ?FreeFunction) bool;
+    pub const addFilter = dbus_connection_add_filter;
 
     pub extern fn dbus_connection_remove_filter(connection: *Connection, function: HandleMessageFunction, user_data: ?*anyopaque) void;
     pub const removeFilter = dbus_connection_remove_filter;
@@ -151,16 +141,12 @@ pub const Connection = opaque {
     pub extern fn dbus_bus_get_private(@"type": BusType, @"error": ?*Error) ?*Connection;
     pub const getPrivate = dbus_bus_get_private;
 
-    pub extern fn dbus_bus_register(connection: *Connection, @"error": ?*Error) dbus_bool_t;
+    pub extern fn dbus_bus_register(connection: *Connection, @"error": ?*Error) bool;
     /// generally not needed, dbus_bus_get/get method is generally what you need
-    pub inline fn register(connection: *Connection, @"error": ?*Error) bool {
-        return dbus_bus_register(connection, @"error");
-    }
+    pub const register = dbus_bus_register;
 
-    pub extern fn dbus_bus_name_has_owner(connection: *Connection, name: [*:0]const u8, @"error": ?*Error) dbus_bool_t;
-    pub inline fn nameHasOwner(connection: *Connection, name: [*:0]const u8, @"error": ?*Error) bool {
-        return dbus_bus_name_has_owner(connection, name, @"error") == .true;
-    }
+    pub extern fn dbus_bus_name_has_owner(connection: *Connection, name: [*:0]const u8, @"error": ?*Error) bool;
+    pub const nameHasOwner = dbus_bus_name_has_owner;
 
     /// Replies to request for a name
     pub const RequestNameReply = enum(c_int) {
@@ -195,11 +181,9 @@ pub const Connection = opaque {
     pub extern fn dbus_bus_get_unique_name(connection: *Connection) ?[*:0]const u8;
     pub const getUniqueName = dbus_bus_get_unique_name;
 
-    pub extern fn dbus_bus_set_unique_name(connection: *Connection, unique_name: [*:0]const u8) dbus_bool_t;
+    pub extern fn dbus_bus_set_unique_name(connection: *Connection, unique_name: [*:0]const u8) bool;
     /// note: should not be using unless implementing a custom registration function
-    pub inline fn setUniqueName(connection: *Connection, unique_name: [*:0]const u8) bool {
-        return dbus_bus_set_unique_name(connection, unique_name) == .true;
-    }
+    pub const setUniqueName = dbus_bus_set_unique_name;
 
     pub extern fn dbus_bus_get_unix_user(connection: *Connection, name: [*:0]const u8, err: ?*Error) c_ulong;
     pub const getUnixUser = dbus_bus_get_unix_user;
@@ -211,10 +195,8 @@ pub const Connection = opaque {
         /// Service was already running
         reply_already_running = 2,
     };
-    pub extern fn dbus_bus_start_service_by_name(connection: *Connection, name: [*:0]const u8, flags: u32, result: *StartReply, @"error": ?*Error) dbus_bool_t;
-    pub inline fn startServiceByName(connection: *Connection, name: [*:0]const u8, flags: u32, result: *StartReply, @"error": ?*Error) bool {
-        return dbus_bus_start_service_by_name(connection, name, flags, result, @"error") == .true;
-    }
+    pub extern fn dbus_bus_start_service_by_name(connection: *Connection, name: [*:0]const u8, flags: u32, result: *StartReply, @"error": ?*Error) bool;
+    pub const startServiceByName = dbus_bus_start_service_by_name;
 
     /// flags should be 0
     pub extern fn dbus_bus_add_match(connection: *Connection, rule: [*:0]const u8, err: ?*Error) void;
@@ -243,15 +225,11 @@ pub const Watch = opaque {
     pub extern fn dbus_watch_set_data(watch: *Watch, data: ?*anyopaque, free_data_function: FreeFunction) void;
     pub const setData = dbus_watch_set_data;
 
-    pub extern fn dbus_watch_handle(watch: *Watch, flags: u32) dbus_bool_t;
-    pub inline fn handle(watch: *Watch, flags: u32) bool {
-        return dbus_watch_handle(watch, flags) == .true;
-    }
+    pub extern fn dbus_watch_handle(watch: *Watch, flags: u32) bool;
+    pub const handle = dbus_watch_handle;
 
-    pub extern fn dbus_watch_get_enabled(watch: *Watch) dbus_bool_t;
-    pub inline fn getEnabled(watch: *Watch) bool {
-        return dbus_watch_get_enabled(watch) == .true;
-    }
+    pub extern fn dbus_watch_get_enabled(watch: *Watch) bool;
+    pub const getEnabled = dbus_watch_get_enabled;
 
     pub const READABLE: c_int = 1;
     pub const WRITABLE: c_int = 2;
@@ -260,7 +238,7 @@ pub const Watch = opaque {
 };
 
 pub const FreeFunction = *const fn (connection: *Connection, user_data: *anyopaque) callconv(.C) void;
-pub const AddWatchFunction = *const fn (watch: *Watch, user_data: *anyopaque) callconv(.C) dbus_bool_t;
+pub const AddWatchFunction = *const fn (watch: *Watch, user_data: *anyopaque) callconv(.C) bool;
 pub const RemoveWatchFunction = *const fn (watch: *Watch, user_data: *anyopaque) callconv(.C) void;
 pub const WatchToggledFunction = *const fn (watch: *Watch, user_data: *anyopaque) callconv(.C) void;
 pub const DispatchStatusFunction = *const fn (connection: *Connection, new_status: DispatchStatus, data: *anyopaque) callconv(.C) void;
@@ -344,26 +322,20 @@ pub const Message = opaque {
     pub extern fn dbus_message_get_path(message: *Message) ?[*:0]const u8;
     pub const getPath = dbus_message_get_path;
 
-    pub extern fn dbus_message_set_path(message: *Message, object_path: [*:0]const u8) dbus_bool_t;
-    pub inline fn setPath(message: *Message, object_path: [*:0]const u8) bool {
-        return dbus_message_set_path(message, object_path) == .true;
-    }
+    pub extern fn dbus_message_set_path(message: *Message, object_path: [*:0]const u8) bool;
+    pub const setPath = dbus_message_set_path;
 
     pub extern fn dbus_message_get_interface(message: *Message) ?[*:0]const u8;
     pub const getInterface = dbus_message_get_interface;
 
-    pub extern fn dbus_message_set_interface(message: *Message, iface: [*:0]const u8) dbus_bool_t;
-    pub inline fn setInterface(message: *Message, iface: [*:0]const u8) bool {
-        return dbus_message_set_interface(message, iface) == .true;
-    }
+    pub extern fn dbus_message_set_interface(message: *Message, iface: [*:0]const u8) bool;
+    pub const setInterface = dbus_message_set_interface;
 
     pub extern fn dbus_message_get_member(message: *Message) ?[*:0]const u8;
     pub const getMember = dbus_message_get_member;
 
-    pub extern fn dbus_message_set_member(message: *Message, member: [*:0]const u8) dbus_bool_t;
-    pub inline fn setMember(message: *Message, member: [*:0]const u8) bool {
-        return dbus_message_set_member(message, member) == .true;
-    }
+    pub extern fn dbus_message_set_member(message: *Message, member: [*:0]const u8) bool;
+    pub const setMember = dbus_message_set_member;
 
     pub extern fn dbus_message_get_serial(message: *Message) u32;
     pub const getSerial = dbus_message_get_serial;
@@ -376,32 +348,24 @@ pub const Message = opaque {
         return dbus_message_set_no_reply(message, if (no_reply) .true else .false);
     }
 
-    pub extern fn dbus_message_get_no_reply(message: *Message) dbus_bool_t;
-    pub inline fn getNoReply(message: *Message) bool {
-        return dbus_message_get_no_reply(message) == .true;
-    }
+    pub extern fn dbus_message_get_no_reply(message: *Message) bool;
+    pub const getNoReply = dbus_message_get_no_reply;
 
-    pub extern fn dbus_message_set_error_name(message: *Message, error_name: ?[*:0]const u8) dbus_bool_t;
-    pub inline fn setErrorName(message: *Message, error_name: ?[*:0]const u8) bool {
-        return dbus_message_set_error_name(message, error_name) == .true;
-    }
+    pub extern fn dbus_message_set_error_name(message: *Message, error_name: ?[*:0]const u8) bool;
+    pub const setErrorName = dbus_message_set_error_name;
 
     pub extern fn dbus_message_get_error_name(message: *Message) ?[*:0]const u8;
     pub const getErrorName = dbus_message_get_error_name;
 
-    pub extern fn dbus_message_set_destination(message: *Message, destination: ?[*:0]const u8) dbus_bool_t;
-    pub inline fn setDestination(message: *Message, destination: ?[*:0]const u8) bool {
-        return dbus_message_set_destination(message, destination) == .true;
-    }
+    pub extern fn dbus_message_set_destination(message: *Message, destination: ?[*:0]const u8) bool;
+    pub const setDestination = dbus_message_set_destination;
 
     pub extern fn dbus_message_get_destination(message: *Message) ?[*:0]const u8;
     pub const getDestination = dbus_message_get_destination;
 
     // Turn a DBusMessage into the marshalled form as described in the D-Bus specification.
-    pub extern fn dbus_message_marshal(msg: *Message, marshalled_data_p: *[*]u8, len_p: *c_int) dbus_bool_t;
-    pub fn marshal(msg: *Message, marshalled_data_p: *[*]u8, len_p: *c_int) bool {
-        return dbus_message_marshal(msg, marshalled_data_p, len_p) == .true;
-    }
+    pub extern fn dbus_message_marshal(msg: *Message, marshalled_data_p: *[*]u8, len_p: *c_int) bool;
+    pub const marshal = dbus_message_marshal;
 
     /// convenience function around dbus_message_marshal
     pub fn marshalSlice(msg: *Message) ![]u8 {
@@ -427,34 +391,22 @@ pub const Message = opaque {
     pub extern fn dbus_message_demarshal_bytes_needed(str: [*:0]const u8, len: c_int) c_int;
     pub const demarshalBytesNeeded = dbus_message_demarshal_bytes_needed;
 
-    pub extern fn dbus_message_get_args(message: *Message, @"error": ?*Error, first_arg_type: ArgType, ...) dbus_bool_t;
-    pub fn getArgs(message: *Message, @"error": ?*Error, first_arg_type: ArgType, ...) callconv(.C) bool {
-        var ap = @cVaStart();
-        defer @cVaEnd(&ap);
-        return dbus_message_get_args_valist(message, @"error", first_arg_type, &ap) == .true;
-    }
+    pub extern fn dbus_message_get_args(message: *Message, @"error": ?*Error, first_arg_type: ArgType, ...) bool;
+    pub const getArgs = dbus_message_get_args;
 
-    pub extern fn dbus_message_get_args_valist(message: *Message, @"error": ?*Error, first_arg_type: ArgType, var_args: [*c]std.builtin.VaList) dbus_bool_t;
-    pub inline fn getArgsVaList(message: *Message, @"error": ?*Error, first_arg_type: ArgType, var_args: [*c]std.builtin.VaList) bool {
-        return dbus_message_get_args_valist(message, @"error", first_arg_type, var_args) == .true;
-    }
+    pub extern fn dbus_message_get_args_valist(message: *Message, @"error": ?*Error, first_arg_type: ArgType, var_args: [*c]std.builtin.VaList) bool;
+    pub const getArgsVaList = dbus_message_get_args_valist;
 
-    pub extern fn dbus_message_iter_init(message: *Message, iter: *MessageIter) dbus_bool_t;
-    pub inline fn iterInit(message: *Message, iter: *MessageIter) bool {
-        return dbus_message_iter_init(message, iter) == .true;
-    }
+    pub extern fn dbus_message_iter_init(message: *Message, iter: *MessageIter) bool;
+    pub const iterInit = dbus_message_iter_init;
 
     pub extern fn dbus_message_iter_init_append(message: *Message, iter: *MessageIter) void;
     pub const iterInitAppend = dbus_message_iter_init_append;
 
-    pub extern fn dbus_message_append_args(message: ?*Message, first_arg_type: ArgType, ...) dbus_bool_t;
-    pub fn appendArgs(message: *Message, first_arg_type: ArgType, ...) callconv(.C) bool {
-        var ap = @cVaStart();
-        defer @cVaEnd(&ap);
-        return dbus_message_append_args_valist(message, first_arg_type, &ap) == .true;
-    }
+    pub extern fn dbus_message_append_args(message: ?*Message, first_arg_type: ArgType, ...) bool;
+    pub const appendArgs = dbus_message_append_args;
 
-    pub extern fn dbus_message_append_args_valist(message: ?*Message, first_arg_type: ArgType, var_args: [*c]std.builtin.VaList) dbus_bool_t;
+    pub extern fn dbus_message_append_args_valist(message: ?*Message, first_arg_type: ArgType, var_args: [*c]std.builtin.VaList) bool;
     pub inline fn appendArgsVaList(message: ?*Message, first_arg_type: ArgType, var_args: [*c]std.builtin.VaList) bool {
         return dbus_message_append_args_valist(message, first_arg_type, var_args);
     }
@@ -503,15 +455,11 @@ pub const MessageIter = extern struct {
     pad2: ?*anyopaque = null,
     pad3: ?*anyopaque = null,
 
-    pub extern fn dbus_message_iter_has_next(iter: *MessageIter) dbus_bool_t;
-    pub inline fn hasNext(iter: *MessageIter) bool {
-        return dbus_message_iter_has_next(iter) == .true;
-    }
+    pub extern fn dbus_message_iter_has_next(iter: *MessageIter) bool;
+    pub const hasNext = dbus_message_iter_has_next;
 
-    pub extern fn dbus_message_iter_next(iter: *MessageIter) dbus_bool_t;
-    pub inline fn next(iter: *MessageIter) bool {
-        return dbus_message_iter_next(iter) == .true;
-    }
+    pub extern fn dbus_message_iter_next(iter: *MessageIter) bool;
+    pub const next = dbus_message_iter_next;
 
     pub extern fn dbus_message_iter_get_arg_type(iter: *MessageIter) ArgType;
     pub const getArgType = dbus_message_iter_get_arg_type;
@@ -544,30 +492,22 @@ pub const MessageIter = extern struct {
     pub extern fn dbus_message_iter_recurse(iter: *MessageIter, sub: *MessageIter) void;
     pub const recurse = dbus_message_iter_recurse;
 
-    pub extern fn dbus_message_iter_append_basic(iter: *MessageIter, @"type": ArgType, value: *const anyopaque) dbus_bool_t;
-    pub inline fn appendBasic(iter: *MessageIter, @"type": ArgType, value: *const anyopaque) bool {
-        return dbus_message_iter_append_basic(iter, @"type", value) == .true;
-    }
+    pub extern fn dbus_message_iter_append_basic(iter: *MessageIter, @"type": ArgType, value: *const anyopaque) bool;
+    pub const appendBasic = dbus_message_iter_append_basic;
 
-    pub extern fn dbus_message_iter_append_fixed_array(iter: *MessageIter, element_type: ArgType, value: *const anyopaque, n_elements: c_int) dbus_bool_t;
-    pub inline fn appendFixedArray(iter: *MessageIter, element_type: ArgType, value: *const anyopaque, n_elements: c_int) bool {
-        return dbus_message_iter_append_fixed_array(iter, element_type, value, n_elements) == .true;
-    }
+    pub extern fn dbus_message_iter_append_fixed_array(iter: *MessageIter, element_type: ArgType, value: *const anyopaque, n_elements: c_int) bool;
+    pub const appendFixedArray = dbus_message_iter_append_fixed_array;
 
     pub fn appendFixedArraySlice(iter: *MessageIter, slice: anytype) Allocator.Error!void {
         const element_type = ArgType.fromType(@typeInfo(@TypeOf(slice)).Pointer.child).?;
         if (!iter.appendFixedArray(element_type, @ptrCast(&slice), @intCast(slice.len))) return error.OutOfMemory;
     }
 
-    pub extern fn dbus_message_iter_open_container(iter: *MessageIter, @"type": ArgType, contained_signature: ?[*:0]const u8, sub: *MessageIter) dbus_bool_t;
-    pub inline fn openContainer(iter: *MessageIter, @"type": ArgType, contained_signature: ?[*:0]const u8, sub: *MessageIter) bool {
-        return dbus_message_iter_open_container(iter, @"type", contained_signature, sub) == .true;
-    }
+    pub extern fn dbus_message_iter_open_container(iter: *MessageIter, @"type": ArgType, contained_signature: ?[*:0]const u8, sub: *MessageIter) bool;
+    pub const openContainer = dbus_message_iter_open_container;
 
-    pub extern fn dbus_message_iter_close_container(iter: *MessageIter, sub: *MessageIter) dbus_bool_t;
-    pub inline fn closeContainer(iter: *MessageIter, sub: *MessageIter) bool {
-        return dbus_message_iter_close_container(iter, sub) == .true;
-    }
+    pub extern fn dbus_message_iter_close_container(iter: *MessageIter, sub: *MessageIter) bool;
+    pub const closeContainer = dbus_message_iter_close_container;
 
     pub extern fn dbus_message_iter_abandon_container(iter: *MessageIter, sub: *MessageIter) void;
     pub const abandonContainer = dbus_message_iter_abandon_container;
@@ -672,7 +612,7 @@ pub const MessageIter = extern struct {
             .Enum => |enum_info| {
                 // enum masquerading as a int
                 if (enum_info.tag_type != void) {
-                    if (T == dbus_bool_t) {
+                    if (T == bool) {
                         if (!iter.appendBasic(.boolean, ptr)) return error.OutOfMemory;
                     }
                     if (!iter.appendBasic(ArgType.fromType(enum_info.tag_type).?, ptr)) return error.OutOfMemory;
@@ -1428,7 +1368,7 @@ pub fn methodSet(message: *Message, dbus_object: anytype) ?*Message {
                 if (split_name[0] == .setProperty and std.mem.orderZ(u8, args.property_name, split_name[1]) == .eq) {
                     const function = @field(InterfaceType, decl.name);
                     function(interface_pointer, @field(args.value, @tagName(Arg.fromType(fnParams(function)[1]))));
-                    return if (message.getNoReply() == .true)
+                    return if (message.getNoReply())
                         null
                     else
                         message.newMethodReturn() orelse return message.newError(c.DBUS_ERROR_NO_MEMORY, "Out of Memory").?;
@@ -1810,20 +1750,16 @@ pub const PendingCall = opaque {
 
     pub const NotifyFunction = *const fn (pending: *PendingCall, user_data: *anyopaque) callconv(.C) void;
     ///Sets a notification function to be called when the reply is received or the pending call times out.
-    pub extern fn dbus_pending_call_set_notify(pending: *PendingCall, function: NotifyFunction, user_data: *void, free_user_data: ?FreeFunction) dbus_bool_t;
-    pub inline fn setNotify(pending: *PendingCall, function: NotifyFunction, user_data: *void, free_user_data: ?FreeFunction) bool {
-        return dbus_pending_call_set_notify(pending, function, user_data, free_user_data) == .true;
-    }
+    pub extern fn dbus_pending_call_set_notify(pending: *PendingCall, function: NotifyFunction, user_data: *void, free_user_data: ?FreeFunction) bool;
+    pub const setNotify = dbus_pending_call_set_notify;
 
     /// Cancels the pending call, such that any reply or error received will just be ignored.
     pub extern fn dbus_pending_call_cancel(pending: *PendingCall) void;
     pub const cancel = dbus_pending_call_cancel;
 
     /// Checks whether the pending call has received a reply yet, or not.
-    pub extern fn dbus_pending_call_get_completed(pending: *PendingCall) dbus_bool_t;
-    pub inline fn getCompleted(pending: *PendingCall) bool {
-        return dbus_pending_call_get_completed(pending) == .true;
-    }
+    pub extern fn dbus_pending_call_get_completed(pending: *PendingCall) bool;
+    pub const getCompleted = dbus_pending_call_get_completed;
 
     /// Gets the reply, or returns NULL if none has been received yet.
     pub extern fn dbus_pending_call_steal_reply(pending: *PendingCall) ?*Message;

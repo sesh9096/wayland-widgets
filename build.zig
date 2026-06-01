@@ -62,6 +62,7 @@ pub fn build(b: *std.Build) void {
     inline for (.{
         "xml/dbus/DBusMenu.xml",
         "xml/dbus/StatusNotifierWatcher.xml",
+        "xml/dbus/StatusNotifierItem.xml",
         "xml/dbus/Notifications.xml",
     }) |xml_path| {
         const generated_path = comptime blk: {
