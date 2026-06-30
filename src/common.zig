@@ -14,6 +14,7 @@ pub const Scheduler = @import("./Scheduler.zig");
 pub const FileNotifier = @import("./FileNotifier.zig");
 pub const Watch = @import("./Watch.zig");
 pub const dbus = @import("dbus");
+pub const icon = @import("icon/theme.zig");
 pub const c = @cImport({
     @cInclude("cairo/cairo.h");
     @cInclude("pango/pangocairo.h");
@@ -310,4 +311,5 @@ test "different types" {
 
 test {
     _ = Style;
+    _ = icon;
 }
