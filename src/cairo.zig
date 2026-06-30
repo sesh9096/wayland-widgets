@@ -128,6 +128,9 @@ pub const Context = opaque {
 };
 
 pub const Surface = opaque {
+    extern fn cairo_image_surface_create(format: Format, width: i32, height: i32) *Surface;
+    pub const create = cairo_image_surface_create;
+
     extern fn cairo_image_surface_create_from_png(path: [*:0]const u8) *Surface;
     pub const createFromPng = cairo_image_surface_create_from_png;
 

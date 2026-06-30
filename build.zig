@@ -55,6 +55,7 @@ pub fn build(b: *std.Build) void {
     exe.linkSystemLibrary("wayland-client");
     exe.linkSystemLibrary("cairo");
     exe.linkSystemLibrary("pangocairo");
+    exe.linkSystemLibrary("rsvg-2");
 
     // slightly less stupid way to generate dbus client proxies
     var dbus_codegen_step = b.addRunArtifact(dbus_codegen);

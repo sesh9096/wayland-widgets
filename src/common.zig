@@ -15,6 +15,7 @@ pub const FileNotifier = @import("./FileNotifier.zig");
 pub const Watch = @import("./Watch.zig");
 pub const dbus = @import("dbus");
 pub const icon = @import("icon/theme.zig");
+pub const rsvg = @import("rsvg.zig");
 pub const c = @cImport({
     @cInclude("cairo/cairo.h");
     @cInclude("pango/pangocairo.h");
